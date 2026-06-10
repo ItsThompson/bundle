@@ -37,7 +37,7 @@ async def upload_artifact(
     # Validate type
     if type not in ("screenshot", "note", "link"):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="type must be one of: screenshot, note, link",
         )
 
@@ -48,9 +48,16 @@ async def upload_artifact(
             parsed_created_at = parsed_created_at.replace(tzinfo=UTC)
     except ValueError:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="created_at must be a valid ISO 8601 timestamp",
         ) from None
+
+    # Reject early if Content-Length header indicates file is too large
+    if file.size is not None and file.size > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File too large. Maximum size is {MAX_FILE_SIZE // (1024 * 1024)} MB",
+        )
 
     # Read file content with size limit
     content = await file.read()
@@ -62,7 +69,7 @@ async def upload_artifact(
 
     if len(content) == 0:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="File must not be empty",
         )
 

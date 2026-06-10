@@ -81,7 +81,10 @@ def _setup_test_db() -> Generator[None, None, None]:
                     max_attempts INT NOT NULL DEFAULT 3,
                     scheduled_after TIMESTAMPTZ,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    search_vector tsvector GENERATED ALWAYS AS (
+                        to_tsvector('english', COALESCE(content_text, ''))
+                    ) STORED
                 )
             """)
             await conn.execute("""

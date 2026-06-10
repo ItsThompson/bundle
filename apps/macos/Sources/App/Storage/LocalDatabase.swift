@@ -64,7 +64,8 @@ final class LocalDatabase {
             CREATE TABLE IF NOT EXISTS tags (
                 id TEXT PRIMARY KEY,
                 artifact_id TEXT NOT NULL REFERENCES artifacts(id),
-                name TEXT NOT NULL
+                name TEXT NOT NULL,
+                UNIQUE (artifact_id, name)
             )
         """)
 

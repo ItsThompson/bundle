@@ -105,9 +105,10 @@ final class ArtifactUploadService {
         var body = Data()
 
         // File field
+        let mimeType = mimeTypeForArtifact(type: type, fileName: fileName)
         body.appendString("--\(boundary)\r\n")
         body.appendString("Content-Disposition: form-data; name=\"file\"; filename=\"\(fileName)\"\r\n")
-        body.appendString("Content-Type: image/png\r\n\r\n")
+        body.appendString("Content-Type: \(mimeType)\r\n\r\n")
         body.append(fileData)
         body.appendString("\r\n")
 
@@ -135,5 +136,20 @@ private extension Data {
         if let data = string.data(using: .utf8) {
             append(data)
         }
+    }
+}
+
+// MARK: - MIME Type Helper
+
+private func mimeTypeForArtifact(type: String, fileName: String) -> String {
+    switch type {
+    case "screenshot":
+        return "image/png"
+    case "note":
+        return "text/markdown"
+    case "link":
+        return "application/json"
+    default:
+        return "application/octet-stream"
     }
 }

@@ -65,13 +65,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func requestAccessibilityIfNeeded() {
         let trusted = AXIsProcessTrusted()
+        print("[Bundle] AXIsProcessTrusted: \(trusted)")
+
         if !trusted {
-            // This triggers the macOS system prompt asking the user to grant access
+            // Trigger the system prompt to open System Settings → Accessibility
             let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
             AXIsProcessTrustedWithOptions(options)
             print("[Bundle] Accessibility permission not granted. System prompt triggered.")
-        } else {
-            print("[Bundle] Accessibility permission granted.")
+            print("[Bundle] Also grant Input Monitoring in System Settings → Privacy & Security → Input Monitoring")
+        }
+
+        // On macOS Sequoia+, CGEvent taps also require Input Monitoring permission
+        let canPost = CGPreflightPostEventAccess()
+        print("[Bundle] CGPreflightPostEventAccess: \(canPost)")
+        if !canPost {
+            // Request post event access (triggers Input Monitoring prompt)
+            CGRequestPostEventAccess()
+            print("[Bundle] Input Monitoring permission not granted. Requesting access.")
         }
     }
 

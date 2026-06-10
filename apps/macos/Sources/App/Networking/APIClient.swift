@@ -52,10 +52,6 @@ final class APIClient {
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
 
-    /// Prevents concurrent refresh requests.
-    private var isRefreshing = false
-    private var refreshContinuation: CheckedContinuation<Bool, Never>?
-
     init(
         baseURL: String = APIClient.defaultBaseURL,
         tokenStore: TokenStore = KeychainManager(),

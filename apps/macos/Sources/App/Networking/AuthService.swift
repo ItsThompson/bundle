@@ -45,6 +45,11 @@ final class AuthService: ObservableObject {
     func register(email: String, password: String) async {
         errorMessage = nil
 
+        if let validationError = validateEmail(email) {
+            errorMessage = validationError
+            return
+        }
+
         if let validationError = validatePasswordLocally(password) {
             errorMessage = validationError
             return
@@ -74,6 +79,12 @@ final class AuthService: ObservableObject {
 
     func login(email: String, password: String) async {
         errorMessage = nil
+
+        if let validationError = validateEmail(email) {
+            errorMessage = validationError
+            return
+        }
+
         isLoading = true
         defer { isLoading = false }
 
@@ -109,7 +120,7 @@ final class AuthService: ObservableObject {
                     body: RefreshRequest(refreshToken: refreshToken)
                 )
             } catch {
-                // Ignore logout errors: always clear locally
+                print("[Bundle] Logout request failed (clearing locally): \(error.localizedDescription)")
             }
         }
 
@@ -120,6 +131,15 @@ final class AuthService: ObservableObject {
     }
 
     // MARK: - Password Validation
+
+    /// Client-side email format validation.
+    func validateEmail(_ email: String) -> String? {
+        let pattern = #"^[^@\s]+@[^@\s]+\.[^@\s]+$"#
+        guard email.range(of: pattern, options: .regularExpression) != nil else {
+            return "Please enter a valid email address"
+        }
+        return nil
+    }
 
     /// Client-side password validation: 8-72 chars, 1 upper, 1 lower, 1 digit.
     func validatePasswordLocally(_ password: String) -> String? {

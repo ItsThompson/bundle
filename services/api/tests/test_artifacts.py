@@ -394,3 +394,138 @@ class TestNoteUpload:
 
         content_text = asyncio.run(check_content_text())
         assert content_text is None
+
+
+class TestLinkUpload:
+    """Tests for POST /api/v1/artifacts with type='link'."""
+
+    def test_upload_link_success(
+        self, client: TestClient, auth_headers: dict[str, str], tmp_path, monkeypatch
+    ) -> None:
+        """Valid link upload returns 201 with type 'link'."""
+        monkeypatch.setattr(
+            client.app.state.settings, "artifacts_path", str(tmp_path)
+        )
+
+        link_url = "https://example.com/article"
+        response = client.post(
+            "/api/v1/artifacts",
+            data={
+                "type": "link",
+                "created_at": "2026-06-10T12:00:00Z",
+                "content_text": link_url,
+            },
+            files={"file": ("link.json", b'{"url": "https://example.com/article"}', "application/json")},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 201
+        data = response.json()
+        assert data["type"] == "link"
+        assert data["status"] == "pending"
+
+    def test_upload_link_stores_content_text(
+        self, client: TestClient, auth_headers: dict[str, str], tmp_path, monkeypatch
+    ) -> None:
+        """Link upload stores the URL in content_text column."""
+        import asyncio
+
+        import asyncpg
+
+        monkeypatch.setattr(
+            client.app.state.settings, "artifacts_path", str(tmp_path)
+        )
+
+        link_url = "https://developer.mozilla.org/en-US/docs/Web"
+        response = client.post(
+            "/api/v1/artifacts",
+            data={
+                "type": "link",
+                "created_at": "2026-06-10T15:00:00Z",
+                "content_text": link_url,
+            },
+            files={"file": ("link.json", b'{"url": "https://developer.mozilla.org/en-US/docs/Web"}', "application/json")},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 201
+        artifact_id = response.json()["id"]
+
+        async def check_content_text() -> str | None:
+            conn = await asyncpg.connect(TEST_DATABASE_URL)
+            try:
+                row = await conn.fetchrow(
+                    "SELECT content_text FROM artifacts WHERE id = $1",
+                    __import__("uuid").UUID(artifact_id),
+                )
+                return row["content_text"] if row else None
+            finally:
+                await conn.close()
+
+        content_text = asyncio.run(check_content_text())
+        assert content_text == link_url
+
+    def test_upload_link_creates_json_file(
+        self, client: TestClient, auth_headers: dict[str, str], tmp_path, monkeypatch
+    ) -> None:
+        """Link upload saves a .json file to disk."""
+        monkeypatch.setattr(
+            client.app.state.settings, "artifacts_path", str(tmp_path)
+        )
+
+        file_content = b'{"url": "https://example.com"}'
+        response = client.post(
+            "/api/v1/artifacts",
+            data={
+                "type": "link",
+                "created_at": "2026-06-10T16:00:00Z",
+                "content_text": "https://example.com",
+            },
+            files={"file": ("link.json", file_content, "application/json")},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 201
+
+        json_files = list(tmp_path.rglob("*.json"))
+        assert len(json_files) == 1
+        assert json_files[0].read_bytes() == file_content
+
+    def test_upload_link_without_content_text(
+        self, client: TestClient, auth_headers: dict[str, str], tmp_path, monkeypatch
+    ) -> None:
+        """Link upload without content_text still succeeds (content_text is NULL)."""
+        import asyncio
+
+        import asyncpg
+
+        monkeypatch.setattr(
+            client.app.state.settings, "artifacts_path", str(tmp_path)
+        )
+
+        response = client.post(
+            "/api/v1/artifacts",
+            data={
+                "type": "link",
+                "created_at": "2026-06-10T17:00:00Z",
+            },
+            files={"file": ("link.json", b'{"url": "https://example.com"}', "application/json")},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 201
+        artifact_id = response.json()["id"]
+
+        async def check_content_text() -> str | None:
+            conn = await asyncpg.connect(TEST_DATABASE_URL)
+            try:
+                row = await conn.fetchrow(
+                    "SELECT content_text FROM artifacts WHERE id = $1",
+                    __import__("uuid").UUID(artifact_id),
+                )
+                return row["content_text"] if row else None
+            finally:
+                await conn.close()
+
+        content_text = asyncio.run(check_content_text())
+        assert content_text is None

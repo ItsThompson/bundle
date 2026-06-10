@@ -69,18 +69,21 @@ struct ZoomableImageView: NSViewRepresentable {
 
         // Center the image initially
         DispatchQueue.main.async {
-            centerImage(in: scrollView)
+            self.centerImage(in: scrollView)
         }
 
         return scrollView
     }
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
-        if let imageView = scrollView.documentView as? NSImageView {
+        // Only update image if it actually changed (avoid resetting user zoom/pan)
+        if let imageView = scrollView.documentView as? NSImageView,
+           imageView.image !== image {
             imageView.image = image
             imageView.setFrameSize(image.size)
         }
-        scrollView.magnification = magnification
+        // Do NOT reset magnification here: the user controls zoom via scroll/pinch.
+        // The NSScrollView handles magnification natively.
     }
 
     private func centerImage(in scrollView: NSScrollView) {

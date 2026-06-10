@@ -108,7 +108,7 @@ final class ArtifactDetailViewTests: XCTestCase {
         XCTAssertEqual(url.path, "/path")
     }
 
-    func testLinkArtifactWithInvalidURLFailsGracefully() {
+    func testLinkArtifactWithEmptyURLIsNotOpenable() {
         let artifact = Artifact(
             id: "link-2",
             type: .link,
@@ -120,10 +120,11 @@ final class ArtifactDetailViewTests: XCTestCase {
             tags: []
         )
 
+        // Empty string produces a URL with empty path, not a valid openable URL
         let url = artifact.contentText.flatMap { URL(string: $0) }
-        // Empty string creates a URL with empty path, so this should be nil or empty
-        // The guard in handleTileTap checks for a valid URL before opening
-        XCTAssertNotNil(artifact.contentText)
+        XCTAssertNotNil(url, "Empty string creates a URL object")
+        // But it has no host, so the handleTileTap guard rejects it
+        XCTAssertNil(url?.host, "Empty URL has no host, so it won't be opened in browser")
     }
 
     // MARK: - Metadata Display Tests

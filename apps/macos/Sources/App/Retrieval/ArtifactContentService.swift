@@ -48,7 +48,13 @@ final class ArtifactContentService {
     /// Fetch artifact content from backend and save to local cache.
     private func fetchAndCache(artifact: Artifact) async throws -> URL {
         let path = "/api/v1/artifacts/\(artifact.id)/content"
-        let data: Data = try await fetchRawData(path: path)
+
+        let data: Data
+        do {
+            data = try await apiClient.requestData(method: .get, path: path)
+        } catch {
+            throw ArtifactContentError.fetchFailed(0)
+        }
 
         // Determine local save path
         let fileName = artifact.contentPath ?? "\(artifact.id).png"
@@ -62,33 +68,6 @@ final class ArtifactContentService {
         try data.write(to: localURL)
 
         return localURL
-    }
-
-    /// Fetch raw data from the backend (bypasses JSON decoding).
-    private func fetchRawData(path: String) async throws -> Data {
-        guard let url = URL(string: APIClient.defaultBaseURL + path) else {
-            throw ArtifactContentError.invalidURL
-        }
-
-        let tokenStore: TokenStore = KeychainManager()
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-
-        if let token = tokenStore.getAccessToken() {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
-
-        let (data, response) = try await URLSession.ephemeral.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw ArtifactContentError.networkError
-        }
-
-        guard httpResponse.statusCode == 200 else {
-            throw ArtifactContentError.fetchFailed(httpResponse.statusCode)
-        }
-
-        return data
     }
 }
 

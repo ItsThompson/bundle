@@ -106,6 +106,20 @@ final class APIClient {
         )
     }
 
+    /// Make an authenticated API request that returns raw Data (e.g., file downloads).
+    /// Handles token injection and 401 refresh retry like other request methods.
+    func requestData(
+        method: HTTPMethod,
+        path: String,
+        authenticated: Bool = true
+    ) async throws -> Data {
+        return try await performRawRequest(
+            method: method,
+            path: path,
+            authenticated: authenticated
+        )
+    }
+
     // MARK: - Private Implementation
 
     private func performRequest<T: Decodable>(
@@ -196,6 +210,58 @@ final class APIClient {
             return errorResponse.detail
         }
         return "Unknown error"
+    }
+
+    /// Perform a raw data request (no JSON decoding) with auth and 401 refresh retry.
+    private func performRawRequest(
+        method: HTTPMethod,
+        path: String,
+        authenticated: Bool,
+        isRetry: Bool = false
+    ) async throws -> Data {
+        guard let url = URL(string: baseURL + path) else {
+            throw APIError.invalidURL
+        }
+
+        var urlRequest = URLRequest(url: url)
+        urlRequest.httpMethod = method.rawValue
+
+        if authenticated, let token = tokenStore.getAccessToken() {
+            urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+
+        let data: Data
+        let response: URLResponse
+
+        do {
+            (data, response) = try await session.data(for: urlRequest)
+        } catch {
+            throw APIError.networkError(error)
+        }
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw APIError.networkError(URLError(.badServerResponse))
+        }
+
+        if httpResponse.statusCode == 401 && authenticated && !isRetry {
+            let refreshed = await attemptTokenRefresh()
+            if refreshed {
+                return try await performRawRequest(
+                    method: method,
+                    path: path,
+                    authenticated: authenticated,
+                    isRetry: true
+                )
+            }
+            throw APIError.sessionExpired
+        }
+
+        guard (200...299).contains(httpResponse.statusCode) else {
+            let detail = parseErrorDetail(from: data)
+            throw APIError.serverError(httpResponse.statusCode, detail)
+        }
+
+        return data
     }
 
     /// Attempt to refresh the access token using the stored refresh token.

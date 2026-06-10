@@ -18,6 +18,10 @@ struct ArtifactGridContainer: View {
     @State private var searchResults: [Artifact] = []
     @State private var searchDebounceTask: Task<Void, Never>?
 
+    // Tag filter state
+    @State private var allTags: [TagItem] = []
+    @State private var selectedTag: String? = nil
+
     private let initialLoadCount = 40
     private let pageSize = 20
     private let debounceInterval: Duration = .milliseconds(300)
@@ -33,9 +37,24 @@ struct ArtifactGridContainer: View {
             )
             .padding(.horizontal, 16)
             .padding(.top, 16)
-            .padding(.bottom, 8)
+            .padding(.bottom, 4)
             .onChange(of: searchText) { _, newValue in
                 handleSearchTextChange(newValue)
+            }
+
+            // Tag filter bar between search and grid
+            if searchText.isEmpty && !allTags.isEmpty {
+                TagFilterBar(
+                    tags: allTags,
+                    totalCount: totalCount,
+                    selectedTag: selectedTag,
+                    onSelectTag: { tag in
+                        selectedTag = tag
+                        loadFilteredArtifacts()
+                    }
+                )
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
             }
 
             // Content area
@@ -63,11 +82,15 @@ struct ArtifactGridContainer: View {
                 .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
         )
         .clipShape(RoundedRectangle(cornerRadius: 12))
-        .onAppear { loadInitialArtifacts() }
+        .onAppear {
+            loadInitialArtifacts()
+            loadTags()
+        }
         .onChange(of: syncService.isSyncing) { wasSyncing, isSyncing in
-            // Reload chronological data after sync completes
+            // Reload data and tags after sync completes
             if wasSyncing && !isSyncing && searchText.isEmpty {
                 loadInitialArtifacts()
+                loadTags()
             }
         }
     }
@@ -307,6 +330,59 @@ struct ArtifactGridContainer: View {
         isSearching = false
     }
 
+    // MARK: - Tag Loading
+
+    /// Load all tags with counts from local SQLite.
+    private func loadTags() {
+        do {
+            let tagCounts = try localDatabase.getTagsWithCounts()
+            allTags = tagCounts.map { TagItem(name: $0.name, count: $0.count) }
+        } catch {
+            print("[Bundle] Failed to load tags: \(error)")
+            allTags = []
+        }
+    }
+
+    /// Reload artifacts based on the current tag filter.
+    private func loadFilteredArtifacts() {
+        guard !isLoading else { return }
+        isLoading = true
+        artifacts = []
+
+        do {
+            if let tagName = selectedTag {
+                // Filter by selected tag
+                let filteredCount = try localDatabase.getArtifactCountForTag(tagName: tagName)
+                let localArtifacts = try localDatabase.getArtifactsForTag(
+                    tagName: tagName, limit: initialLoadCount, offset: 0
+                )
+                let ids = localArtifacts.map { $0.id }
+                let tagsByArtifact = try localDatabase.getTagsForArtifacts(ids: ids)
+
+                artifacts = localArtifacts.map { local in
+                    mapToArtifact(local: local, tags: tagsByArtifact[local.id] ?? [])
+                }
+                hasMore = artifacts.count < filteredCount
+                // Note: totalCount stays as the full count for the "All" pill
+            } else {
+                // "All" selected: reload without filter
+                totalCount = try localDatabase.getArtifactCount()
+                let localArtifacts = try localDatabase.getArtifacts(limit: initialLoadCount, offset: 0)
+                let ids = localArtifacts.map { $0.id }
+                let tagsByArtifact = try localDatabase.getTagsForArtifacts(ids: ids)
+
+                artifacts = localArtifacts.map { local in
+                    mapToArtifact(local: local, tags: tagsByArtifact[local.id] ?? [])
+                }
+                hasMore = artifacts.count < totalCount
+            }
+        } catch {
+            print("[Bundle] Failed to load filtered artifacts: \(error)")
+        }
+
+        isLoading = false
+    }
+
     // MARK: - Data Loading (Chronological)
 
     private func loadInitialArtifacts() {
@@ -336,7 +412,14 @@ struct ArtifactGridContainer: View {
         isLoading = true
 
         do {
-            let localArtifacts = try localDatabase.getArtifacts(limit: pageSize, offset: artifacts.count)
+            let localArtifacts: [LocalArtifact]
+            if let tagName = selectedTag {
+                localArtifacts = try localDatabase.getArtifactsForTag(
+                    tagName: tagName, limit: pageSize, offset: artifacts.count
+                )
+            } else {
+                localArtifacts = try localDatabase.getArtifacts(limit: pageSize, offset: artifacts.count)
+            }
             let ids = localArtifacts.map { $0.id }
             let tagsByArtifact = try localDatabase.getTagsForArtifacts(ids: ids)
 
@@ -344,7 +427,13 @@ struct ArtifactGridContainer: View {
                 mapToArtifact(local: local, tags: tagsByArtifact[local.id] ?? [])
             }
             artifacts.append(contentsOf: newArtifacts)
-            hasMore = artifacts.count < totalCount
+
+            if let tagName = selectedTag {
+                let filteredCount = try localDatabase.getArtifactCountForTag(tagName: tagName)
+                hasMore = artifacts.count < filteredCount
+            } else {
+                hasMore = artifacts.count < totalCount
+            }
         } catch {
             print("[Bundle] Failed to load more artifacts: \(error)")
         }

@@ -19,6 +19,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Hide from Dock: equivalent to Info.plist LSUIElement = true
         NSApp.setActivationPolicy(.accessory)
 
+        // Check and prompt for Accessibility permissions (required for global hotkey)
+        requestAccessibilityIfNeeded()
+
         // Initialize settings panel with hotkey manager and artifact count
         settingsPanel = SettingsPanel(
             authService: authService,
@@ -56,6 +59,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func showRetrievalPanel() {
         retrievalPanel?.toggle()
+    }
+
+    // MARK: - Accessibility Permissions
+
+    private func requestAccessibilityIfNeeded() {
+        let trusted = AXIsProcessTrusted()
+        if !trusted {
+            // This triggers the macOS system prompt asking the user to grant access
+            let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
+            AXIsProcessTrustedWithOptions(options)
+            print("[Bundle] Accessibility permission not granted. System prompt triggered.")
+        } else {
+            print("[Bundle] Accessibility permission granted.")
+        }
     }
 
     // MARK: - Hotkey Handler

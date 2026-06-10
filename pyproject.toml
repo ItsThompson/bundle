@@ -19,8 +19,18 @@ ignore = ["E501"]
 quote-style = "double"
 indent-style = "space"
 
+[tool.pytest.ini_options]
+testpaths = ["libs", "services"]
+
 [tool.pyright]
 pythonVersion = "3.12"
 typeCheckingMode = "basic"
 venvPath = "."
 venv = ".venv"
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.410",
+    "pytest>=9.0.3",
+    "ruff>=0.15.16",
+]

@@ -1,8 +1,7 @@
 """FastAPI application entry point."""
 
-from fastapi import FastAPI
-
 from bundle_common import configure_logging, get_logger
+from fastapi import FastAPI
 
 
 def create_app() -> FastAPI:

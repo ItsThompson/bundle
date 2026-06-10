@@ -41,7 +41,7 @@ final class SettingsPanel {
         let hostingView = NSHostingView(rootView: contentView)
         hostingView.frame = NSRect(x: 0, y: 0, width: 380, height: 560)
 
-        let panel = NSPanel(
+        let panel = KeyablePanel(
             contentRect: NSRect(x: 0, y: 0, width: 380, height: 560),
             styleMask: [.titled, .closable, .nonactivatingPanel],
             backing: .buffered,

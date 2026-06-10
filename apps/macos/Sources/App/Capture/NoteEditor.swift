@@ -57,7 +57,7 @@ final class NoteEditor {
             y: screenFrame.midY - height / 2
         )
 
-        let panel = NSPanel(
+        let panel = KeyablePanel(
             contentRect: NSRect(origin: origin, size: NSSize(width: width, height: height)),
             styleMask: [.nonactivatingPanel, .borderless],
             backing: .buffered,
@@ -65,7 +65,7 @@ final class NoteEditor {
         )
         panel.level = .floating
         panel.isFloatingPanel = true
-        panel.becomesKeyOnlyIfNeeded = true
+        panel.becomesKeyOnlyIfNeeded = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.isOpaque = false
         panel.backgroundColor = .clear
@@ -83,7 +83,7 @@ final class NoteEditor {
         hostingView.frame = NSRect(x: 0, y: 0, width: width, height: height)
         panel.contentView = hostingView
 
-        panel.orderFrontRegardless()
+        panel.makeKeyAndOrderFront(nil)
         self.panel = panel
 
         installKeyboardMonitor()

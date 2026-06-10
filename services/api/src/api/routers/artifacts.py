@@ -26,9 +26,11 @@ from api.models.artifact_responses import (
     ArtifactListResponse,
     ArtifactResponse,
     ArtifactWithTagsResponse,
+    SearchResponse,
+    SearchResultResponse,
     TagWithCountResponse,
 )
-from api.services import artifact_service, processing_service
+from api.services import artifact_service, processing_service, search_service
 
 router = APIRouter(prefix="/api/v1/artifacts", tags=["artifacts"])
 logger = structlog.get_logger("api.artifacts")
@@ -122,6 +124,58 @@ async def upload_artifact(
     )
 
 
+@router.get("/search", response_model=SearchResponse)
+async def search_artifacts(
+    q: Annotated[str, Query(min_length=1, max_length=500)],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+    request: Request,
+) -> SearchResponse:
+    """Hybrid search across artifacts using BM25 full-text + vector similarity.
+
+    Combines text ranking (0.4 weight) and embedding cosine similarity (0.6 weight).
+    Searches note text, link URLs, and tag-derived content via tsvector.
+    Returns up to 40 ranked results.
+    """
+    embedding_provider = _get_embedding_provider(request)
+    if embedding_provider is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Search is unavailable: embedding provider not configured",
+        )
+
+    results = await search_service.hybrid_search(
+        pool=pool,
+        embedding_provider=embedding_provider,
+        user_id=current_user.id,
+        query=q,
+    )
+
+    items = [
+        SearchResultResponse(
+            id=r["id"],
+            type=r["type"],
+            content_text=r["content_text"],
+            status=r["status"],
+            created_at=r["created_at"],
+            updated_at=r["updated_at"],
+            tags=r["tags"],
+            text_rank=r["text_rank"],
+            vector_similarity=r["vector_similarity"],
+        )
+        for r in results
+    ]
+
+    logger.info(
+        "search_request",
+        user_id=str(current_user.id),
+        query=q,
+        result_count=len(items),
+    )
+
+    return SearchResponse(items=items, query=q, total=len(items))
+
+
 @router.get("", response_model=ArtifactListResponse)
 async def list_artifacts(
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
@@ -145,7 +199,7 @@ async def list_artifacts(
                     since_dt = since_dt.replace(tzinfo=UTC)
             except ValueError:
                 raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                     detail="updated_since must be a valid ISO 8601 timestamp",
                 ) from None
 
@@ -221,6 +275,34 @@ async def list_artifacts(
     ]
 
     return ArtifactListResponse(items=items, total=total, limit=limit, offset=offset)
+
+
+@router.get("/tags", response_model=list[TagWithCountResponse])
+async def list_tags(
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+) -> list[TagWithCountResponse]:
+    """List all tag names with counts for the current user.
+
+    Returns tags ordered by count descending.
+    """
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT at.name, COUNT(*) AS count
+            FROM artifact_tags at
+            JOIN artifacts a ON a.id = at.artifact_id
+            WHERE a.user_id = $1
+            GROUP BY at.name
+            ORDER BY count DESC
+            """,
+            current_user.id,
+        )
+
+    return [
+        TagWithCountResponse(name=row["name"], count=row["count"])
+        for row in rows
+    ]
 
 
 @router.get("/{artifact_id}/content")
@@ -322,34 +404,6 @@ async def retry_artifact(
     )
 
 
-@router.get("/tags", response_model=list[TagWithCountResponse])
-async def list_tags(
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
-    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
-) -> list[TagWithCountResponse]:
-    """List all tag names with counts for the current user.
-
-    Returns tags ordered by count descending.
-    """
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT at.name, COUNT(*) AS count
-            FROM artifact_tags at
-            JOIN artifacts a ON a.id = at.artifact_id
-            WHERE a.user_id = $1
-            GROUP BY at.name
-            ORDER BY count DESC
-            """,
-            current_user.id,
-        )
-
-    return [
-        TagWithCountResponse(name=row["name"], count=row["count"])
-        for row in rows
-    ]
-
-
 def _media_type_for_artifact(artifact_type: str) -> str:
     """Return the MIME type for serving artifact files."""
     match artifact_type:
@@ -361,3 +415,8 @@ def _media_type_for_artifact(artifact_type: str) -> str:
             return "application/json"
         case _:
             return "application/octet-stream"
+
+
+def _get_embedding_provider(request: Request):
+    """Retrieve the embedding provider from app state, or None if not configured."""
+    return getattr(request.app.state, "embedding_provider", None)

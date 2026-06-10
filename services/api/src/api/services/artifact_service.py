@@ -1,0 +1,75 @@
+"""Artifact service: file storage, DB operations, processing notification."""
+
+import uuid
+from datetime import UTC, datetime
+from pathlib import Path
+
+import asyncpg
+import structlog
+
+from api.config import Settings
+
+logger = structlog.get_logger("api.artifact_service")
+
+
+async def create_artifact(
+    pool: asyncpg.Pool,
+    settings: Settings,
+    user_id: uuid.UUID,
+    artifact_type: str,
+    file_content: bytes,
+    created_at: datetime,
+) -> dict:
+    """Save artifact file to disk and create DB row.
+
+    Returns the artifact record as a dict.
+    """
+    artifact_id = uuid.uuid4()
+    date_str = created_at.strftime("%Y/%m/%d")
+    file_ext = _extension_for_type(artifact_type)
+    relative_path = f"{user_id}/{date_str}/{artifact_id}{file_ext}"
+    full_path = Path(settings.artifacts_path) / relative_path
+
+    # Ensure directory exists
+    full_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Write file to disk
+    full_path.write_bytes(file_content)
+    logger.info(
+        "artifact_file_saved",
+        artifact_id=str(artifact_id),
+        path=str(relative_path),
+        size_bytes=len(file_content),
+    )
+
+    # Insert DB row
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO artifacts (id, user_id, type, storage_path, status, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, 'pending', $5, $5)
+            RETURNING id, user_id, type, storage_path, status, attempts,
+                      scheduled_after, created_at, updated_at
+            """,
+            artifact_id,
+            user_id,
+            artifact_type,
+            relative_path,
+            created_at.astimezone(UTC),
+        )
+
+    logger.info("artifact_created", artifact_id=str(artifact_id), type=artifact_type)
+    return dict(row)
+
+
+def _extension_for_type(artifact_type: str) -> str:
+    """Return file extension for a given artifact type."""
+    match artifact_type:
+        case "screenshot":
+            return ".png"
+        case "note":
+            return ".md"
+        case "link":
+            return ".json"
+        case _:
+            return ".bin"

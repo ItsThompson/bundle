@@ -67,6 +67,32 @@ def _setup_test_db() -> Generator[None, None, None]:
                     revoked_at TIMESTAMPTZ NOT NULL DEFAULT now()
                 )
             """)
+            await conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS public.artifacts (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+                    type TEXT NOT NULL CHECK (type IN ('screenshot', 'note', 'link')),
+                    storage_path TEXT NOT NULL,
+                    content_text TEXT,
+                    status TEXT NOT NULL DEFAULT 'pending'
+                        CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
+                    attempts INT NOT NULL DEFAULT 0,
+                    max_attempts INT NOT NULL DEFAULT 3,
+                    scheduled_after TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+            """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS public.artifact_tags (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    artifact_id UUID NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
+                    name TEXT NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    UNIQUE (artifact_id, name)
+                )
+            """)
         finally:
             await conn.close()
 
@@ -86,6 +112,8 @@ def _clean_tables(_setup_test_db: None) -> Generator[None, None, None]:
     async def cleanup() -> None:
         conn = await asyncpg.connect(TEST_DATABASE_URL)
         try:
+            await conn.execute("DELETE FROM public.artifact_tags")
+            await conn.execute("DELETE FROM public.artifacts")
             await conn.execute("DELETE FROM auth.refresh_token_blacklist")
             await conn.execute("DELETE FROM auth.users")
         finally:

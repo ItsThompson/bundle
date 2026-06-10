@@ -25,5 +25,9 @@ venv/
 Thumbs.db
 
 
+# Swift Package Manager
+.build/
+.swiftpm/
+
 # Docker volumes
 pgdata/

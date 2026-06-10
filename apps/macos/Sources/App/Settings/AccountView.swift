@@ -29,6 +29,11 @@ struct AccountView: View {
         .onAppear {
             emailField = authService.currentUser?.email ?? ""
         }
+        .onChange(of: authService.currentUser?.email) {
+            if let email = authService.currentUser?.email, !isUpdatingEmail {
+                emailField = email
+            }
+        }
     }
 
     // MARK: - Account Info

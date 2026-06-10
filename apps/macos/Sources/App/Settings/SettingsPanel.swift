@@ -36,7 +36,7 @@ final class SettingsPanel {
         let contentView = SettingsContentView(
             authService: authService,
             hotkeyManager: hotkeyManager,
-            artifactCount: artifactCountProvider()
+            artifactCountProvider: artifactCountProvider
         )
         let hostingView = NSHostingView(rootView: contentView)
         hostingView.frame = NSRect(x: 0, y: 0, width: 380, height: 560)
@@ -69,7 +69,9 @@ final class SettingsPanel {
 private struct SettingsContentView: View {
     @ObservedObject var authService: AuthService
     @ObservedObject var hotkeyManager: HotkeyManager
-    let artifactCount: Int
+    let artifactCountProvider: () -> Int
+
+    @State private var artifactCount = 0
 
     var body: some View {
         ScrollView {
@@ -87,6 +89,10 @@ private struct SettingsContentView: View {
             .padding()
         }
         .frame(minWidth: 340, minHeight: 400)
+        .onAppear { artifactCount = artifactCountProvider() }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+            artifactCount = artifactCountProvider()
+        }
     }
 
     private var logoutSection: some View {

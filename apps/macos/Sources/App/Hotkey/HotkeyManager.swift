@@ -233,9 +233,15 @@ final class HotkeyManager: ObservableObject {
     // MARK: - Recording Mode
 
     /// Enter recording mode: captures the next key combo via local event monitor.
+    /// Disables the global event tap so the current hotkey doesn't fire during recording.
     func startRecording(completion: @escaping (KeyCombo) -> Void) {
         isRecording = true
         recordingCompletion = completion
+
+        // Disable global hotkey during recording to avoid triggering capture palette
+        if let tap = eventTap {
+            CGEvent.tapEnable(tap: tap, enable: false)
+        }
 
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
             guard let self = self else { return event }
@@ -275,6 +281,11 @@ final class HotkeyManager: ObservableObject {
         if let monitor = localMonitor {
             NSEvent.removeMonitor(monitor)
             localMonitor = nil
+        }
+
+        // Re-enable global hotkey after recording ends
+        if let tap = eventTap {
+            CGEvent.tapEnable(tap: tap, enable: true)
         }
     }
 

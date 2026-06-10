@@ -3,18 +3,16 @@
 import asyncio
 import io
 import uuid
-from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock
 
 import asyncpg
 import pytest
-from PIL import Image
-
 from api.config import Settings
 from api.processing.embedder import Embedder
 from api.processing.tagger import Tagger
 from api.processing.worker import ProcessingWorker
+from PIL import Image
 
 TEST_DATABASE_URL = "postgresql://bundle:bundle_dev@localhost:5433/bundle_test"
 

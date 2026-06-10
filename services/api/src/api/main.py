@@ -9,6 +9,7 @@ import structlog
 from fastapi import FastAPI, Request, Response
 
 from api.config import Settings, get_settings
+from api.routers.auth import router as auth_router
 from api.routers.health import router as health_router
 
 
@@ -76,6 +77,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return response
 
     # Register routers
+    app.include_router(auth_router)
     app.include_router(health_router)
 
     logger.info("app_created")

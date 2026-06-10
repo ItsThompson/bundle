@@ -1,9 +1,10 @@
 import SwiftUI
 
 /// Container view that manages artifact loading and displays the grid.
-/// Handles infinite scroll pagination and empty state.
+/// Handles infinite scroll pagination, empty state, and retry actions.
 struct ArtifactGridContainer: View {
     let localDatabase: LocalDatabase
+    var onArtifactTap: ((Artifact) -> Void)?
 
     @State private var artifacts: [Artifact] = []
     @State private var isLoading = false
@@ -12,6 +13,7 @@ struct ArtifactGridContainer: View {
 
     private let initialLoadCount = 40
     private let pageSize = 20
+    private let artifactAPIService = ArtifactAPIService()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -64,10 +66,14 @@ struct ArtifactGridContainer: View {
                 spacing: 12
             ) {
                 ForEach(artifacts) { artifact in
-                    ArtifactTile(artifact: artifact)
-                        .onAppear {
-                            checkLoadMore(artifact: artifact)
-                        }
+                    ArtifactTile(
+                        artifact: artifact,
+                        onTap: { onArtifactTap?(artifact) },
+                        onRetry: { id in retryArtifact(id: id) }
+                    )
+                    .onAppear {
+                        checkLoadMore(artifact: artifact)
+                    }
                 }
             }
             .padding(16)
@@ -75,6 +81,53 @@ struct ArtifactGridContainer: View {
             if isLoading {
                 ProgressView()
                     .padding()
+            }
+        }
+    }
+
+    // MARK: - Retry
+
+    /// Trigger retry for a failed artifact via the backend.
+    /// Updates the local tile status immediately for instant feedback.
+    private func retryArtifact(id: String) {
+        // Optimistically update local status to "pending"
+        if let index = artifacts.firstIndex(where: { $0.id == id }) {
+            artifacts[index] = Artifact(
+                id: artifacts[index].id,
+                type: artifacts[index].type,
+                contentPath: artifacts[index].contentPath,
+                contentText: artifacts[index].contentText,
+                status: "pending",
+                createdAt: artifacts[index].createdAt,
+                syncedAt: artifacts[index].syncedAt,
+                tags: artifacts[index].tags
+            )
+        }
+
+        // Update local SQLite
+        try? localDatabase.updateArtifactStatus(id: id, status: "pending")
+
+        // Call backend retry endpoint
+        Task {
+            do {
+                _ = try await artifactAPIService.retryArtifact(id: id)
+                print("[Bundle] Retry requested for artifact \(id)")
+            } catch {
+                print("[Bundle] Retry failed for artifact \(id): \(error)")
+                // Revert optimistic update on failure
+                if let index = artifacts.firstIndex(where: { $0.id == id }) {
+                    artifacts[index] = Artifact(
+                        id: artifacts[index].id,
+                        type: artifacts[index].type,
+                        contentPath: artifacts[index].contentPath,
+                        contentText: artifacts[index].contentText,
+                        status: "failed",
+                        createdAt: artifacts[index].createdAt,
+                        syncedAt: artifacts[index].syncedAt,
+                        tags: artifacts[index].tags
+                    )
+                }
+                try? localDatabase.updateArtifactStatus(id: id, status: "failed")
             }
         }
     }
@@ -132,6 +185,13 @@ struct ArtifactGridContainer: View {
         if index >= threshold {
             loadMoreArtifacts()
         }
+    }
+
+    // MARK: - Refresh (called by sync)
+
+    /// Reload artifacts from local database. Call after sync updates SQLite.
+    func refreshArtifacts() {
+        loadInitialArtifacts()
     }
 
     // MARK: - Mapping

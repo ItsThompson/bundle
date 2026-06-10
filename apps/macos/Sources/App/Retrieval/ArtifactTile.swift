@@ -6,8 +6,12 @@ import SwiftUI
 /// - Link: favicon + domain name
 ///
 /// On hover: dims with an overlay bar showing type icon, relative timestamp, and tags.
+/// On click: triggers onTap callback to navigate to detail view.
+/// Shows processing status indicators: spinner for pending/processing, retry button for failed.
 struct ArtifactTile: View {
     let artifact: Artifact
+    let onTap: () -> Void
+    let onRetry: (String) -> Void
 
     @State private var isHovered = false
 
@@ -19,21 +23,68 @@ struct ArtifactTile: View {
                 .frame(maxWidth: .infinity)
                 .frame(height: tileHeight)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
+                .opacity(processingOpacity)
 
             if isHovered {
                 hoverOverlay
+            }
+
+            // Status badge (top-right corner)
+            if isProcessingOrFailed {
+                VStack {
+                    HStack {
+                        Spacer()
+                        StatusBadge(status: artifact.status) {
+                            onRetry(artifact.id)
+                        }
+                        .padding(6)
+                    }
+                    Spacer()
+                }
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
+                .stroke(borderColor, lineWidth: 0.5)
         )
+        .contentShape(Rectangle())
+        .onTapGesture { onTap() }
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.1)) {
                 isHovered = hovering
             }
         }
+        .help(failureTooltip)
+    }
+
+    // MARK: - Status Helpers
+
+    private var isProcessingOrFailed: Bool {
+        artifact.status == "pending" || artifact.status == "processing" || artifact.status == "failed"
+    }
+
+    /// Subtle reduced opacity for pending/processing tiles.
+    private var processingOpacity: Double {
+        switch artifact.status {
+        case "pending", "processing":
+            return 0.7
+        default:
+            return 1.0
+        }
+    }
+
+    /// Border color: red tint for failed artifacts.
+    private var borderColor: Color {
+        artifact.status == "failed"
+            ? Color.red.opacity(0.5)
+            : Color(nsColor: .separatorColor)
+    }
+
+    /// Tooltip showing failure reason for failed artifacts.
+    private var failureTooltip: String {
+        guard artifact.status == "failed" else { return "" }
+        return "Processing failed. Click the retry button to reprocess."
     }
 
     // MARK: - Type-Specific Content

@@ -211,12 +211,12 @@ class TestTagsList:
 
     def test_tags_requires_auth(self, client: TestClient) -> None:
         """Tags list without token returns 401."""
-        response = client.get("/api/v1/artifacts/tags")
+        response = client.get("/api/v1/tags")
         assert response.status_code == 401
 
     def test_tags_empty(self, client: TestClient, auth_headers: dict[str, str]) -> None:
         """Tags list with no artifacts returns empty list."""
-        response = client.get("/api/v1/artifacts/tags", headers=auth_headers)
+        response = client.get("/api/v1/tags", headers=auth_headers)
         assert response.status_code == 200
         assert response.json() == []
 
@@ -261,7 +261,7 @@ class TestTagsList:
 
         asyncio.run(add_tags())
 
-        response = client.get("/api/v1/artifacts/tags", headers=auth_headers)
+        response = client.get("/api/v1/tags", headers=auth_headers)
         assert response.status_code == 200
         data = response.json()
         assert len(data) == 2
@@ -317,12 +317,12 @@ class TestTagsList:
         asyncio.run(add_tags())
 
         # User 2 should see no tags
-        response = client.get("/api/v1/artifacts/tags", headers=headers2)
+        response = client.get("/api/v1/tags", headers=headers2)
         assert response.status_code == 200
         assert response.json() == []
 
         # User 1 should see their tag
-        response = client.get("/api/v1/artifacts/tags", headers=headers1)
+        response = client.get("/api/v1/tags", headers=headers1)
         assert response.status_code == 200
         assert len(response.json()) == 1
         assert response.json()[0]["name"] == "user1-tag"

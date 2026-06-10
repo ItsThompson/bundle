@@ -123,9 +123,6 @@ final class SyncService: ObservableObject {
 
         initialSyncProgress = 1.0
 
-        // Also sync tags
-        try await syncTags()
-
         // Save the sync timestamp
         try localDatabase.setLastSyncTimestamp(Date())
     }
@@ -161,23 +158,8 @@ final class SyncService: ObservableObject {
             offset += limit
         }
 
-        // Sync tags if any artifacts were updated
-        try await syncTags()
-
         // Update the sync timestamp to now
         try localDatabase.setLastSyncTimestamp(Date())
-    }
-
-    /// Sync all tags from backend.
-    private func syncTags() async throws {
-        let tags: [TagCountResponse] = try await apiClient.request(
-            method: .get,
-            path: "/api/v1/artifacts/tags"
-        )
-        // Tags are synced per-artifact in upsertArtifact; this endpoint is for
-        // the tag filter bar. We don't need to store counts locally since they
-        // can be computed from local data.
-        _ = tags
     }
 
     // MARK: - Local Database Operations

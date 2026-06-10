@@ -207,7 +207,8 @@ final class LocalDatabase {
     func getTagsForArtifacts(ids: [String]) throws -> [String: [String]] {
         guard !ids.isEmpty else { return [:] }
 
-        let placeholders = ids.map { "'\($0.replacingOccurrences(of: "'", with: "''"))'" }.joined(separator: ", ")
+        // Build parameterized query with positional placeholders
+        let placeholders = ids.enumerated().map { _ in "?" }.joined(separator: ", ")
         let sql = "SELECT artifact_id, name FROM tags WHERE artifact_id IN (\(placeholders))"
 
         var stmt: OpaquePointer?
@@ -215,6 +216,11 @@ final class LocalDatabase {
             throw LocalDatabaseError.prepareFailed(lastError)
         }
         defer { sqlite3_finalize(stmt) }
+
+        // Bind each ID as a parameter
+        for (index, id) in ids.enumerated() {
+            sqlite3_bind_text(stmt, Int32(index + 1), (id as NSString).utf8String, -1, nil)
+        }
 
         var result: [String: [String]] = [:]
         while sqlite3_step(stmt) == SQLITE_ROW {
@@ -227,8 +233,17 @@ final class LocalDatabase {
 
     /// Insert or update tags for an artifact.
     func upsertTags(artifactId: String, tags: [String]) throws {
-        // Delete existing tags
-        try execute("DELETE FROM tags WHERE artifact_id = '\(artifactId.replacingOccurrences(of: "'", with: "''"))'")
+        // Delete existing tags using parameterized query
+        let deleteSql = "DELETE FROM tags WHERE artifact_id = ?"
+        var deleteStmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, deleteSql, -1, &deleteStmt, nil) == SQLITE_OK else {
+            throw LocalDatabaseError.prepareFailed(lastError)
+        }
+        defer { sqlite3_finalize(deleteStmt) }
+        sqlite3_bind_text(deleteStmt, 1, (artifactId as NSString).utf8String, -1, nil)
+        guard sqlite3_step(deleteStmt) == SQLITE_DONE else {
+            throw LocalDatabaseError.execFailed(lastError)
+        }
 
         // Insert new tags
         for tag in tags {

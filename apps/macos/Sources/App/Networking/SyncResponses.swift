@@ -25,9 +25,3 @@ struct SyncListResponse: Decodable {
     let limit: Int
     let offset: Int
 }
-
-/// Response model for a tag with its count.
-struct TagCountResponse: Decodable {
-    let name: String
-    let count: Int
-}

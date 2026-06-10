@@ -12,6 +12,7 @@ from api.config import Settings, get_settings
 from api.routers.artifacts import router as artifacts_router
 from api.routers.auth import router as auth_router
 from api.routers.health import router as health_router
+from api.routers.tags import router as tags_router
 
 
 @asynccontextmanager
@@ -116,6 +117,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(artifacts_router)
     app.include_router(auth_router)
     app.include_router(health_router)
+    app.include_router(tags_router)
 
     logger.info("app_created")
     return app

@@ -26,6 +26,7 @@ from api.models.artifact_responses import (
     ArtifactListResponse,
     ArtifactResponse,
     ArtifactWithTagsResponse,
+    TagWithCountResponse,
 )
 from api.services import artifact_service, processing_service
 
@@ -127,30 +128,67 @@ async def list_artifacts(
     pool: Annotated[asyncpg.Pool, Depends(get_pool)],
     limit: Annotated[int, Query(ge=1, le=100)] = 40,
     offset: Annotated[int, Query(ge=0)] = 0,
+    updated_since: Annotated[str | None, Query()] = None,
 ) -> ArtifactListResponse:
     """List artifacts for the current user, paginated, newest first.
 
-    Returns artifacts with their associated tags.
+    When `updated_since` is provided (ISO 8601 timestamp), returns only
+    artifacts modified after that timestamp, ordered by updated_at ASC.
+    This is used by the sync mechanism for delta updates.
     """
     async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT a.id, a.type, a.storage_path, a.content_text, a.status,
-                   a.created_at, a.updated_at
-            FROM artifacts a
-            WHERE a.user_id = $1
-            ORDER BY a.created_at DESC
-            LIMIT $2 OFFSET $3
-            """,
-            current_user.id,
-            limit,
-            offset,
-        )
+        if updated_since is not None:
+            # Delta sync mode: return artifacts modified after the given timestamp
+            try:
+                since_dt = datetime.fromisoformat(updated_since)
+                if since_dt.tzinfo is None:
+                    since_dt = since_dt.replace(tzinfo=UTC)
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="updated_since must be a valid ISO 8601 timestamp",
+                ) from None
 
-        total = await conn.fetchval(
-            "SELECT COUNT(*) FROM artifacts WHERE user_id = $1",
-            current_user.id,
-        )
+            rows = await conn.fetch(
+                """
+                SELECT a.id, a.type, a.storage_path, a.content_text, a.status,
+                       a.created_at, a.updated_at
+                FROM artifacts a
+                WHERE a.user_id = $1 AND a.updated_at > $2
+                ORDER BY a.updated_at ASC
+                LIMIT $3 OFFSET $4
+                """,
+                current_user.id,
+                since_dt,
+                limit,
+                offset,
+            )
+
+            total = await conn.fetchval(
+                "SELECT COUNT(*) FROM artifacts WHERE user_id = $1 AND updated_at > $2",
+                current_user.id,
+                since_dt,
+            )
+        else:
+            # Standard list mode: paginated, newest first
+            rows = await conn.fetch(
+                """
+                SELECT a.id, a.type, a.storage_path, a.content_text, a.status,
+                       a.created_at, a.updated_at
+                FROM artifacts a
+                WHERE a.user_id = $1
+                ORDER BY a.created_at DESC
+                LIMIT $2 OFFSET $3
+                """,
+                current_user.id,
+                limit,
+                offset,
+            )
+
+            total = await conn.fetchval(
+                "SELECT COUNT(*) FROM artifacts WHERE user_id = $1",
+                current_user.id,
+            )
 
         # Fetch tags for all artifacts in one query
         artifact_ids = [row["id"] for row in rows]
@@ -223,6 +261,93 @@ async def get_artifact_content(
 
     media_type = _media_type_for_artifact(row["type"])
     return FileResponse(path=str(file_path), media_type=media_type)
+
+
+@router.post("/{artifact_id}/retry", response_model=ArtifactResponse)
+async def retry_artifact(
+    artifact_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+) -> ArtifactResponse:
+    """Retry processing for a failed artifact.
+
+    Resets attempts to 0, status to 'pending', clears scheduled_after,
+    and notifies the processing worker to pick it up immediately.
+    """
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE artifacts
+            SET status = 'pending', attempts = 0, scheduled_after = NULL, updated_at = now()
+            WHERE id = $1 AND user_id = $2 AND status = 'failed'
+            RETURNING id, type, status, created_at, updated_at
+            """,
+            artifact_id,
+            current_user.id,
+        )
+
+    if row is None:
+        # Check if artifact exists at all for this user
+        async with pool.acquire() as conn:
+            exists = await conn.fetchval(
+                "SELECT 1 FROM artifacts WHERE id = $1 AND user_id = $2",
+                artifact_id,
+                current_user.id,
+            )
+        if not exists:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Artifact not found",
+            )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Artifact is not in failed state",
+        )
+
+    # Notify the processing worker to pick up the retried artifact
+    processing_service.notify(row["id"])
+
+    logger.info(
+        "artifact_retry_requested",
+        artifact_id=str(artifact_id),
+        user_id=str(current_user.id),
+    )
+
+    return ArtifactResponse(
+        id=row["id"],
+        type=row["type"],
+        status=row["status"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+@router.get("/tags", response_model=list[TagWithCountResponse])
+async def list_tags(
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+) -> list[TagWithCountResponse]:
+    """List all tag names with counts for the current user.
+
+    Returns tags ordered by count descending.
+    """
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT at.name, COUNT(*) AS count
+            FROM artifact_tags at
+            JOIN artifacts a ON a.id = at.artifact_id
+            WHERE a.user_id = $1
+            GROUP BY at.name
+            ORDER BY count DESC
+            """,
+            current_user.id,
+        )
+
+    return [
+        TagWithCountResponse(name=row["name"], count=row["count"])
+        for row in rows
+    ]
 
 
 def _media_type_for_artifact(artifact_type: str) -> str:

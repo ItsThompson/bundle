@@ -146,6 +146,21 @@ final class LocalDatabase {
         return try queryArtifacts(sql: sql)
     }
 
+    /// Get total artifact count.
+    func getArtifactCount() throws -> Int {
+        let sql = "SELECT COUNT(*) FROM artifacts"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw LocalDatabaseError.prepareFailed(lastError)
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        guard sqlite3_step(stmt) == SQLITE_ROW else {
+            return 0
+        }
+        return Int(sqlite3_column_int(stmt, 0))
+    }
+
     // MARK: - Private Helpers
 
     private func execute(_ sql: String) throws {

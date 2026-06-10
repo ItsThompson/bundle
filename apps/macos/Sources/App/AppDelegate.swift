@@ -15,10 +15,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Hide from Dock: equivalent to Info.plist LSUIElement = true
         NSApp.setActivationPolicy(.accessory)
 
-        // Initialize settings panel with hotkey manager
+        // Initialize settings panel with hotkey manager and artifact count
         settingsPanel = SettingsPanel(
             authService: authService,
-            hotkeyManager: hotkeyManager
+            hotkeyManager: hotkeyManager,
+            artifactCountProvider: { [weak self] in
+                (try? self?.localDatabase.getArtifactCount()) ?? 0
+            }
         )
 
         // Open local database

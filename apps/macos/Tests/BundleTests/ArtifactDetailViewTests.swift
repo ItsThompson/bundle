@@ -12,7 +12,7 @@ final class ArtifactDetailViewTests: XCTestCase {
             type: .screenshot,
             contentPath: nil,
             contentText: nil,
-            status: "completed",
+            status: .completed,
             createdAt: Date(),
             syncedAt: nil,
             tags: []
@@ -44,7 +44,7 @@ final class ArtifactDetailViewTests: XCTestCase {
             type: .screenshot,
             contentPath: "test-image.png",
             contentText: nil,
-            status: "completed",
+            status: .completed,
             createdAt: Date(),
             syncedAt: nil,
             tags: []
@@ -68,7 +68,7 @@ final class ArtifactDetailViewTests: XCTestCase {
             type: .screenshot,
             contentPath: "nonexistent.png",
             contentText: nil,
-            status: "completed",
+            status: .completed,
             createdAt: Date(),
             syncedAt: nil,
             tags: []
@@ -91,7 +91,7 @@ final class ArtifactDetailViewTests: XCTestCase {
             type: .link,
             contentPath: nil,
             contentText: "https://www.example.com/path",
-            status: "completed",
+            status: .completed,
             createdAt: Date(),
             syncedAt: nil,
             tags: ["design"]
@@ -114,7 +114,7 @@ final class ArtifactDetailViewTests: XCTestCase {
             type: .link,
             contentPath: nil,
             contentText: "",
-            status: "completed",
+            status: .completed,
             createdAt: Date(),
             syncedAt: nil,
             tags: []
@@ -134,7 +134,7 @@ final class ArtifactDetailViewTests: XCTestCase {
             type: .screenshot,
             contentPath: "2026/06/10/abc.png",
             contentText: nil,
-            status: "completed",
+            status: .completed,
             createdAt: Date(),
             syncedAt: Date(),
             tags: ["design", "typography", "ui"]
@@ -147,10 +147,10 @@ final class ArtifactDetailViewTests: XCTestCase {
     }
 
     func testArtifactStatusValues() {
-        let statuses = ["pending", "processing", "completed", "failed"]
+        let statuses: [ArtifactStatus] = [.pending, .processing, .completed, .failed]
         for status in statuses {
             let artifact = Artifact(
-                id: "status-\(status)",
+                id: "status-\(status.rawValue)",
                 type: .note,
                 contentPath: nil,
                 contentText: "Test note",
@@ -180,7 +180,7 @@ final class ArtifactDetailViewTests: XCTestCase {
             type: .note,
             contentPath: "2026/06/10/note.md",
             contentText: markdownContent,
-            status: "completed",
+            status: .completed,
             createdAt: Date(),
             syncedAt: nil,
             tags: ["ideas"]

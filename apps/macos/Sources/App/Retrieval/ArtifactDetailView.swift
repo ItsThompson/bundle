@@ -176,14 +176,14 @@ struct TagPill: View {
 
 /// Displays the processing status with a colored dot and label in the detail metadata bar.
 struct DetailStatusIndicator: View {
-    let status: String
+    let status: ArtifactStatus
 
     var body: some View {
         HStack(spacing: 4) {
             Circle()
                 .fill(statusColor)
                 .frame(width: 6, height: 6)
-            Text(status)
+            Text(status.rawValue)
                 .font(.system(size: 11))
                 .foregroundColor(.secondary)
         }
@@ -191,13 +191,13 @@ struct DetailStatusIndicator: View {
 
     private var statusColor: Color {
         switch status {
-        case "completed":
+        case .completed:
             return .green
-        case "processing":
+        case .processing:
             return .orange
-        case "failed":
+        case .failed:
             return .red
-        default:
+        case .pending:
             return .gray
         }
     }

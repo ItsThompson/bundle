@@ -50,7 +50,7 @@ struct ArtifactGridContainer: View {
                     selectedTag: selectedTag,
                     onSelectTag: { tag in
                         selectedTag = tag
-                        loadFilteredArtifacts()
+                        loadArtifacts()
                     }
                 )
                 .padding(.horizontal, 16)
@@ -59,15 +59,18 @@ struct ArtifactGridContainer: View {
 
             // Content area
             if syncService.initialSyncProgress != nil {
-                initialSyncProgressView
+                ArtifactGridSyncProgress(
+                    isSyncing: syncService.isSyncing,
+                    progress: syncService.initialSyncProgress
+                )
             } else if isSearching {
-                searchLoadingView
+                ArtifactGridSearchLoading()
             } else if !searchText.isEmpty && searchResults.isEmpty && !isLoading {
-                noMatchesView
+                ArtifactGridNoMatches()
             } else if !searchText.isEmpty {
                 searchResultsGrid
             } else if artifacts.isEmpty && !isLoading {
-                emptyState
+                ArtifactGridEmptyState()
             } else {
                 artifactScrollView
             }
@@ -83,103 +86,15 @@ struct ArtifactGridContainer: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .onAppear {
-            loadInitialArtifacts()
+            loadArtifacts()
             loadTags()
         }
         .onChange(of: syncService.isSyncing) { wasSyncing, isSyncing in
             // Reload data and tags after sync completes
             if wasSyncing && !isSyncing && searchText.isEmpty {
-                loadInitialArtifacts()
+                loadArtifacts()
                 loadTags()
             }
-        }
-    }
-
-    // MARK: - Initial Sync Progress
-
-    private var initialSyncProgressView: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "arrow.triangle.2.circlepath")
-                .font(.system(size: 48))
-                .foregroundColor(.secondary)
-                .rotationEffect(.degrees(syncService.isSyncing ? 360 : 0))
-                .animation(
-                    .linear(duration: 2).repeatForever(autoreverses: false),
-                    value: syncService.isSyncing
-                )
-
-            Text("Syncing artifacts...")
-                .font(.title2)
-                .fontWeight(.medium)
-
-            if let progress = syncService.initialSyncProgress {
-                ProgressView(value: progress)
-                    .progressViewStyle(.linear)
-                    .frame(maxWidth: 200)
-
-                Text("\(Int(progress * 100))%")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(40)
-    }
-
-    // MARK: - Empty State
-
-    private var emptyState: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "square.grid.2x2")
-                .font(.system(size: 48))
-                .foregroundColor(.secondary)
-
-            Text("No artifacts yet")
-                .font(.title2)
-                .fontWeight(.medium)
-
-            Text("Capture screenshots, notes, or links\nusing the global hotkey (⌘⇧B)")
-                .font(.body)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(40)
-    }
-
-    // MARK: - No Matches View
-
-    private var noMatchesView: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 48))
-                .foregroundColor(.secondary)
-
-            Text("No matches found")
-                .font(.title2)
-                .fontWeight(.medium)
-
-            Text("Try a different search term")
-                .font(.body)
-                .foregroundColor(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(40)
-    }
-
-    // MARK: - Search Loading (Skeleton Tiles)
-
-    private var searchLoadingView: some View {
-        ScrollView {
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 150))],
-                spacing: 12
-            ) {
-                ForEach(0..<8, id: \.self) { _ in
-                    SkeletonTile()
-                }
-            }
-            .padding(16)
         }
     }
 
@@ -343,63 +258,20 @@ struct ArtifactGridContainer: View {
         }
     }
 
-    /// Reload artifacts based on the current tag filter.
-    private func loadFilteredArtifacts() {
-        guard !isLoading else { return }
-        isLoading = true
-        artifacts = []
+    // MARK: - Data Loading
 
-        do {
-            if let tagName = selectedTag {
-                // Filter by selected tag
-                let filteredCount = try localDatabase.getArtifactCountForTag(tagName: tagName)
-                let localArtifacts = try localDatabase.getArtifactsForTag(
-                    tagName: tagName, limit: initialLoadCount, offset: 0
-                )
-                let ids = localArtifacts.map { $0.id }
-                let tagsByArtifact = try localDatabase.getTagsForArtifacts(ids: ids)
-
-                artifacts = localArtifacts.map { local in
-                    mapToArtifact(local: local, tags: tagsByArtifact[local.id] ?? [])
-                }
-                hasMore = artifacts.count < filteredCount
-                // Note: totalCount stays as the full count for the "All" pill
-            } else {
-                // "All" selected: reload without filter
-                totalCount = try localDatabase.getArtifactCount()
-                let localArtifacts = try localDatabase.getArtifacts(limit: initialLoadCount, offset: 0)
-                let ids = localArtifacts.map { $0.id }
-                let tagsByArtifact = try localDatabase.getTagsForArtifacts(ids: ids)
-
-                artifacts = localArtifacts.map { local in
-                    mapToArtifact(local: local, tags: tagsByArtifact[local.id] ?? [])
-                }
-                hasMore = artifacts.count < totalCount
-            }
-        } catch {
-            print("[Bundle] Failed to load filtered artifacts: \(error)")
-        }
-
-        isLoading = false
-    }
-
-    // MARK: - Data Loading (Chronological)
-
-    private func loadInitialArtifacts() {
+    /// Load artifacts from offset 0, respecting the active tag filter.
+    /// Used on initial appear, after sync, and when the tag filter changes.
+    private func loadArtifacts() {
         guard !isLoading else { return }
         isLoading = true
         artifacts = []
 
         do {
             totalCount = try localDatabase.getArtifactCount()
-            let localArtifacts = try localDatabase.getArtifacts(limit: initialLoadCount, offset: 0)
-            let ids = localArtifacts.map { $0.id }
-            let tagsByArtifact = try localDatabase.getTagsForArtifacts(ids: ids)
-
-            artifacts = localArtifacts.map { local in
-                mapToArtifact(local: local, tags: tagsByArtifact[local.id] ?? [])
-            }
-            hasMore = artifacts.count < totalCount
+            let (loaded, total) = try fetchArtifactPage(limit: initialLoadCount, offset: 0)
+            artifacts = loaded
+            hasMore = artifacts.count < total
         } catch {
             print("[Bundle] Failed to load artifacts: \(error)")
         }
@@ -412,28 +284,11 @@ struct ArtifactGridContainer: View {
         isLoading = true
 
         do {
-            let localArtifacts: [LocalArtifact]
-            if let tagName = selectedTag {
-                localArtifacts = try localDatabase.getArtifactsForTag(
-                    tagName: tagName, limit: pageSize, offset: artifacts.count
-                )
-            } else {
-                localArtifacts = try localDatabase.getArtifacts(limit: pageSize, offset: artifacts.count)
-            }
-            let ids = localArtifacts.map { $0.id }
-            let tagsByArtifact = try localDatabase.getTagsForArtifacts(ids: ids)
-
-            let newArtifacts = localArtifacts.map { local in
-                mapToArtifact(local: local, tags: tagsByArtifact[local.id] ?? [])
-            }
+            let (newArtifacts, total) = try fetchArtifactPage(
+                limit: pageSize, offset: artifacts.count
+            )
             artifacts.append(contentsOf: newArtifacts)
-
-            if let tagName = selectedTag {
-                let filteredCount = try localDatabase.getArtifactCountForTag(tagName: tagName)
-                hasMore = artifacts.count < filteredCount
-            } else {
-                hasMore = artifacts.count < totalCount
-            }
+            hasMore = artifacts.count < total
         } catch {
             print("[Bundle] Failed to load more artifacts: \(error)")
         }
@@ -449,6 +304,32 @@ struct ArtifactGridContainer: View {
         if index >= threshold {
             loadMoreArtifacts()
         }
+    }
+
+    // MARK: - Shared Fetch Logic
+
+    /// Fetch a page of artifacts, respecting the active tag filter.
+    /// Returns the mapped artifacts and the total count for that filter.
+    private func fetchArtifactPage(limit: Int, offset: Int) throws -> ([Artifact], Int) {
+        let localArtifacts: [LocalArtifact]
+        let total: Int
+
+        if let tagName = selectedTag {
+            localArtifacts = try localDatabase.getArtifactsForTag(
+                tagName: tagName, limit: limit, offset: offset
+            )
+            total = try localDatabase.getArtifactCountForTag(tagName: tagName)
+        } else {
+            localArtifacts = try localDatabase.getArtifacts(limit: limit, offset: offset)
+            total = totalCount
+        }
+
+        let ids = localArtifacts.map { $0.id }
+        let tagsByArtifact = try localDatabase.getTagsForArtifacts(ids: ids)
+        let mapped = localArtifacts.map { local in
+            mapToArtifact(local: local, tags: tagsByArtifact[local.id] ?? [])
+        }
+        return (mapped, total)
     }
 
     // MARK: - Mapping
@@ -471,34 +352,5 @@ struct ArtifactGridContainer: View {
             syncedAt: syncedDate,
             tags: tags
         )
-    }
-}
-
-// MARK: - Skeleton Tile
-
-/// Placeholder tile shown during search loading.
-struct SkeletonTile: View {
-    @State private var isAnimating = false
-
-    var body: some View {
-        RoundedRectangle(cornerRadius: 8)
-            .fill(
-                LinearGradient(
-                    colors: [
-                        Color(nsColor: .controlBackgroundColor),
-                        Color(nsColor: .controlBackgroundColor).opacity(0.5),
-                        Color(nsColor: .controlBackgroundColor),
-                    ],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-            )
-            .frame(height: 150)
-            .opacity(isAnimating ? 0.6 : 1.0)
-            .animation(
-                .easeInOut(duration: 1.0).repeatForever(autoreverses: true),
-                value: isAnimating
-            )
-            .onAppear { isAnimating = true }
     }
 }

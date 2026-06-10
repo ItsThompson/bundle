@@ -60,6 +60,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Hotkey Handler
 
+    func showCapturePalette() {
+        handleHotkeyPressed()
+    }
+
     private func handleHotkeyPressed() {
         capturePalette.show { [weak self] option in
             self?.handleCaptureOption(option)

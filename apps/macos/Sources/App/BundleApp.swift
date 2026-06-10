@@ -7,7 +7,7 @@ struct BundleApp: App {
     var body: some Scene {
         MenuBarExtra("Bundle", systemImage: "square.grid.2x2") {
             Button("Capture Artifact") {
-                print("[Bundle] Capture Artifact selected")
+                appDelegate.showCapturePalette()
             }
             .keyboardShortcut("1")
 

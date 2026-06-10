@@ -6,33 +6,6 @@ import Testing
 struct NoteCaptureTests {
     // MARK: - Database Integration
 
-    @Test("Insert note artifact stores content text in SQLite")
-    func insertNoteArtifactWithContentText() throws {
-        let tempDir = FileManager.default.temporaryDirectory
-        let dbPath = tempDir.appendingPathComponent("test_note_\(UUID().uuidString).db")
-        let db = LocalDatabase(dbPath: dbPath)
-        defer {
-            db.close()
-            try? FileManager.default.removeItem(at: dbPath)
-        }
-        try db.open()
-
-        let noteId = UUID().uuidString
-        let noteContent = "Design notes for the navigation refactor"
-
-        try db.insertArtifact(
-            id: noteId,
-            type: "note",
-            contentPath: "\(noteId).md",
-            contentText: noteContent,
-            status: "pending",
-            createdAt: Date()
-        )
-
-        let count = try db.getArtifactCount()
-        #expect(count == 1)
-    }
-
     @Test("Insert note artifact stores content text and path")
     func insertNoteArtifactStoresContentText() throws {
         let tempDir = FileManager.default.temporaryDirectory

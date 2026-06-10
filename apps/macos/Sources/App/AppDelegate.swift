@@ -205,7 +205,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // 2. Show post-capture thumbnail
         showPostCaptureThumbnail(
-            content: .screenshot(thumbnailPath: result.thumbnailPath),
+            content: .screenshot(fullPath: result.fullPath, thumbnailPath: result.thumbnailPath),
             artifactId: result.artifactId
         )
 
@@ -247,22 +247,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
 
-        switch content {
-        case .screenshot(let thumbnailPath):
-            // Copy full-resolution image (derive from thumbnail path)
-            let fullPath = thumbnailPath.deletingLastPathComponent()
-                .appendingPathComponent(
-                    thumbnailPath.lastPathComponent.replacingOccurrences(of: "_thumb", with: "")
-                )
-            if let image = NSImage(contentsOf: fullPath) {
+        switch content.copyableValue {
+        case .imageFile(let primary, let fallback):
+            if let image = NSImage(contentsOf: primary) {
                 pasteboard.writeObjects([image])
-            } else if let image = NSImage(contentsOf: thumbnailPath) {
+            } else if let image = NSImage(contentsOf: fallback) {
                 pasteboard.writeObjects([image])
             }
-        case .note(let text):
-            pasteboard.setString(text, forType: .string)
-        case .link(let url):
-            pasteboard.setString(url, forType: .string)
+        case .text(let string):
+            pasteboard.setString(string, forType: .string)
         }
     }
 

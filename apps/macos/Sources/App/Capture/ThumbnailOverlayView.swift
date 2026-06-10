@@ -43,7 +43,7 @@ struct ThumbnailOverlayView: View {
     @ViewBuilder
     private var contentView: some View {
         switch content {
-        case .screenshot(let thumbnailPath):
+        case .screenshot(_, let thumbnailPath):
             screenshotView(path: thumbnailPath)
         case .note(let text):
             noteView(text: text)
@@ -91,7 +91,7 @@ struct ThumbnailOverlayView: View {
                 .font(.title2)
                 .foregroundColor(.accentColor)
 
-            Text(extractDomain(from: url))
+            Text(ThumbnailTextUtils.extractDomain(from: url))
                 .font(.system(.caption, design: .monospaced))
                 .foregroundColor(.primary)
                 .lineLimit(1)
@@ -131,8 +131,6 @@ struct ThumbnailOverlayView: View {
 
     /// Truncate note text to first 2-3 lines for preview.
     private func truncatedNoteText(_ text: String) -> String {
-        let lines = text.components(separatedBy: .newlines)
-        let previewLines = Array(lines.prefix(3))
-        return previewLines.joined(separator: "\n")
+        ThumbnailTextUtils.truncateForPreview(text)
     }
 }

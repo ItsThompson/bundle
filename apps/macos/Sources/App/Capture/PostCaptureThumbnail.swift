@@ -4,11 +4,29 @@ import SwiftUI
 /// Content types the post-capture thumbnail can display.
 enum ThumbnailContent {
     /// Screenshot capture: display the image thumbnail.
-    case screenshot(thumbnailPath: URL)
+    case screenshot(fullPath: URL, thumbnailPath: URL)
     /// Note capture: display first 2-3 lines of text.
     case note(text: String)
     /// Link capture: display extracted domain name.
     case link(url: String)
+
+    /// The copyable value for this content.
+    var copyableValue: CopyableContent {
+        switch self {
+        case .screenshot(let fullPath, let thumbnailPath):
+            return .imageFile(primary: fullPath, fallback: thumbnailPath)
+        case .note(let text):
+            return .text(text)
+        case .link(let url):
+            return .text(url)
+        }
+    }
+}
+
+/// What gets placed on the clipboard when "Copy" is pressed.
+enum CopyableContent {
+    case imageFile(primary: URL, fallback: URL)
+    case text(String)
 }
 
 /// Manages the post-capture thumbnail overlay window.
@@ -50,7 +68,7 @@ final class PostCaptureThumbnail {
         // Note: canBecomeKey and canBecomeMain are handled by NonActivatingWindow subclass
         window.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
         window.hidesOnDeactivate = false
-        window.hasShadow = true
+        window.hasShadow = false
         window.isOpaque = false
         window.backgroundColor = .clear
         window.ignoresMouseEvents = false
@@ -140,23 +158,33 @@ final class PostCaptureThumbnail {
     }
 }
 
-// MARK: - Domain Extraction
+// MARK: - Text Utilities
 
-/// Extracts the domain name from a URL string.
-func extractDomain(from urlString: String) -> String {
-    guard let url = URL(string: urlString),
-          let host = url.host else {
-        // Fallback: try to parse manually
-        let stripped = urlString
-            .replacingOccurrences(of: "https://", with: "")
-            .replacingOccurrences(of: "http://", with: "")
-        return stripped.components(separatedBy: "/").first ?? urlString
+/// Utilities for thumbnail content formatting.
+enum ThumbnailTextUtils {
+    /// Extracts the domain name from a URL string.
+    static func extractDomain(from urlString: String) -> String {
+        guard let url = URL(string: urlString),
+              let host = url.host else {
+            // Fallback: try to parse manually
+            let stripped = urlString
+                .replacingOccurrences(of: "https://", with: "")
+                .replacingOccurrences(of: "http://", with: "")
+            return stripped.components(separatedBy: "/").first ?? urlString
+        }
+        // Remove "www." prefix if present
+        if host.hasPrefix("www.") {
+            return String(host.dropFirst(4))
+        }
+        return host
     }
-    // Remove "www." prefix if present
-    if host.hasPrefix("www.") {
-        return String(host.dropFirst(4))
+
+    /// Truncates text to the first 3 lines for thumbnail preview.
+    static func truncateForPreview(_ text: String, maxLines: Int = 3) -> String {
+        let lines = text.components(separatedBy: .newlines)
+        let previewLines = Array(lines.prefix(maxLines))
+        return previewLines.joined(separator: "\n")
     }
-    return host
 }
 
 // MARK: - Non-Activating Window

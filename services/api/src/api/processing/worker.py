@@ -2,7 +2,10 @@
 
 import asyncio
 import contextlib
+import re
+import uuid
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import asyncpg
 import httpx
@@ -160,8 +163,6 @@ class ProcessingWorker:
         self, artifact: asyncpg.Record
     ) -> tuple[list[str], list[float]]:
         """Process screenshot: read image, tag via vision, embed tags."""
-        from pathlib import Path
-
         storage_path = Path(self.settings.artifacts_path) / artifact["storage_path"]
         image_bytes = storage_path.read_bytes()
 
@@ -232,8 +233,6 @@ class ProcessingWorker:
 
     def _strip_html(self, html: str) -> str:
         """Simple HTML tag stripping for link content extraction."""
-        import re
-
         # Remove script and style blocks
         text = re.sub(r"<script[^>]*>.*?</script>", "", html, flags=re.DOTALL)
         text = re.sub(r"<style[^>]*>.*?</style>", "", text, flags=re.DOTALL)
@@ -244,7 +243,7 @@ class ProcessingWorker:
         return text.strip()
 
     async def _store_results(
-        self, artifact_id, tags: list[str], embedding: list[float]
+        self, artifact_id: uuid.UUID, tags: list[str], embedding: list[float]
     ) -> None:
         """Store tags and embedding in DB, mark artifact as completed."""
         async with self.pool.acquire() as conn, conn.transaction():

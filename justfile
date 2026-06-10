@@ -58,4 +58,5 @@ macos-build:
 macos-run:
     cd apps/macos && swift build
     codesign -f -s "Bundle Dev" --identifier com.thompsnt.bundle apps/macos/.build/debug/Bundle
-    apps/macos/.build/debug/Bundle
+    @echo "Launching Bundle..."
+    apps/macos/.build/debug/Bundle &

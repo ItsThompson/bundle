@@ -16,7 +16,7 @@ from api.routers.health import router as health_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Manage application lifecycle: create and teardown the DB pool."""
+    """Manage application lifecycle: DB pool, processing worker."""
     settings: Settings = app.state.settings
     logger = structlog.get_logger("api.lifespan")
 
@@ -28,7 +28,39 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
     logger.info("pool_created")
 
+    # Start the processing worker if LLM keys are configured
+    worker = None
+    if settings.anthropic_api_key and settings.openai_api_key:
+        from api.processing.anthropic_provider import AnthropicProvider
+        from api.processing.embedder import Embedder
+        from api.processing.openai_provider import OpenAIEmbeddingProvider
+        from api.processing.tagger import Tagger
+        from api.processing.worker import ProcessingWorker
+        from api.services import processing_service
+
+        llm_provider = AnthropicProvider(api_key=settings.anthropic_api_key)
+        embedding_provider = OpenAIEmbeddingProvider(api_key=settings.openai_api_key)
+        tagger = Tagger(provider=llm_provider)
+        embedder = Embedder(provider=embedding_provider)
+
+        worker = ProcessingWorker(
+            pool=app.state.pool,
+            settings=settings,
+            tagger=tagger,
+            embedder=embedder,
+        )
+        processing_service.set_worker(worker)
+        await worker.start()
+        logger.info("processing_worker_started")
+    else:
+        logger.warning("processing_worker_skipped", reason="missing API keys")
+
     yield
+
+    # Shutdown worker
+    if worker:
+        await worker.stop()
+        logger.info("processing_worker_stopped")
 
     logger.info("pool_closing")
     await app.state.pool.close()

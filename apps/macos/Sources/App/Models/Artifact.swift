@@ -1,12 +1,35 @@
 import Foundation
 
+/// Processing status of an artifact.
+enum ArtifactStatus: String, CaseIterable, Equatable {
+    case pending
+    case processing
+    case completed
+    case failed
+
+    /// Whether this status indicates the artifact is still being processed.
+    var isProcessing: Bool {
+        self == .pending || self == .processing
+    }
+
+    /// Whether this status indicates a terminal failure.
+    var isFailed: Bool {
+        self == .failed
+    }
+
+    /// Whether a status badge should be shown.
+    var showsBadge: Bool {
+        isProcessing || isFailed
+    }
+}
+
 /// Domain model representing a captured artifact.
 struct Artifact: Identifiable, Equatable {
     let id: String
     let type: ArtifactType
     let contentPath: String?
     let contentText: String?
-    let status: String
+    let status: ArtifactStatus
     let createdAt: Date
     let syncedAt: Date?
     var tags: [String]
@@ -24,6 +47,20 @@ struct Artifact: Identifiable, Equatable {
     /// Relative timestamp string (e.g. "2 min ago", "3 hours ago", "yesterday").
     var relativeTimestamp: String {
         RelativeTimestampFormatter.format(createdAt)
+    }
+
+    /// Create a copy with a different status. Avoids manually copying all fields.
+    func withStatus(_ newStatus: ArtifactStatus) -> Artifact {
+        Artifact(
+            id: id,
+            type: type,
+            contentPath: contentPath,
+            contentText: contentText,
+            status: newStatus,
+            createdAt: createdAt,
+            syncedAt: syncedAt,
+            tags: tags
+        )
     }
 }
 

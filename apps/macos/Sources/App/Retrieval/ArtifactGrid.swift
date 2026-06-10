@@ -23,6 +23,7 @@ struct ArtifactGridContainer: View {
     private let pageSize = 20
     private let debounceInterval: Duration = .milliseconds(300)
     private let searchService = SearchService()
+    private let artifactAPIService = ArtifactAPIService()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -139,7 +140,7 @@ struct ArtifactGridContainer: View {
                     ArtifactTile(
                         artifact: artifact,
                         onTap: { onArtifactTap?(artifact) },
-                        onRetry: { _ in }
+                        onRetry: { id in retryArtifact(id: id) }
                     )
                 }
             }
@@ -159,7 +160,7 @@ struct ArtifactGridContainer: View {
                     ArtifactTile(
                         artifact: artifact,
                         onTap: { onArtifactTap?(artifact) },
-                        onRetry: { _ in }
+                        onRetry: { id in retryArtifact(id: id) }
                     )
                     .onAppear {
                         checkLoadMore(artifact: artifact)
@@ -171,6 +172,39 @@ struct ArtifactGridContainer: View {
             if isLoading {
                 ProgressView()
                     .padding()
+            }
+        }
+    }
+
+    // MARK: - Retry
+
+    /// Trigger retry for a failed artifact via the backend.
+    /// Updates the local tile status immediately for instant feedback.
+    private func retryArtifact(id: String) {
+        // Optimistically update local status to pending
+        if let index = artifacts.firstIndex(where: { $0.id == id }) {
+            artifacts[index] = artifacts[index].withStatus(.pending)
+        }
+        if let index = searchResults.firstIndex(where: { $0.id == id }) {
+            searchResults[index] = searchResults[index].withStatus(.pending)
+        }
+
+        try? localDatabase.updateArtifactStatus(id: id, status: "pending")
+
+        Task {
+            do {
+                _ = try await artifactAPIService.retryArtifact(id: id)
+                print("[Bundle] Retry requested for artifact \(id)")
+            } catch {
+                print("[Bundle] Retry failed for artifact \(id): \(error)")
+                // Revert optimistic update on failure
+                if let index = artifacts.firstIndex(where: { $0.id == id }) {
+                    artifacts[index] = artifacts[index].withStatus(.failed)
+                }
+                if let index = searchResults.firstIndex(where: { $0.id == id }) {
+                    searchResults[index] = searchResults[index].withStatus(.failed)
+                }
+                try? localDatabase.updateArtifactStatus(id: id, status: "failed")
             }
         }
     }
@@ -218,12 +252,13 @@ struct ArtifactGridContainer: View {
 
             searchResults = response.items.map { item in
                 let type = ArtifactType(rawValue: item.type) ?? .screenshot
+                let status = ArtifactStatus(rawValue: item.status) ?? .pending
                 return Artifact(
                     id: item.id,
                     type: type,
                     contentPath: nil,
                     contentText: item.contentText,
-                    status: item.status,
+                    status: status,
                     createdAt: item.createdAt,
                     syncedAt: nil,
                     tags: item.tags
@@ -298,6 +333,7 @@ struct ArtifactGridContainer: View {
 
     private func mapToArtifact(local: LocalArtifact, tags: [String]) -> Artifact {
         let type = ArtifactType(rawValue: local.type) ?? .screenshot
+        let status = ArtifactStatus(rawValue: local.status) ?? .pending
         let date = Self.isoFormatter.date(from: local.createdAt) ?? Date()
         let syncedDate: Date? = local.syncedAt.flatMap { Self.isoFormatter.date(from: $0) }
 
@@ -306,7 +342,7 @@ struct ArtifactGridContainer: View {
             type: type,
             contentPath: local.contentPath,
             contentText: local.contentText,
-            status: local.status,
+            status: status,
             createdAt: date,
             syncedAt: syncedDate,
             tags: tags

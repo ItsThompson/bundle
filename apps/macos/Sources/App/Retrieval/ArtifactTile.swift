@@ -61,29 +61,24 @@ struct ArtifactTile: View {
     // MARK: - Status Helpers
 
     private var isProcessingOrFailed: Bool {
-        artifact.status == "pending" || artifact.status == "processing" || artifact.status == "failed"
+        artifact.status.showsBadge
     }
 
     /// Subtle reduced opacity for pending/processing tiles.
     private var processingOpacity: Double {
-        switch artifact.status {
-        case "pending", "processing":
-            return 0.7
-        default:
-            return 1.0
-        }
+        artifact.status.isProcessing ? 0.7 : 1.0
     }
 
     /// Border color: red tint for failed artifacts.
     private var borderColor: Color {
-        artifact.status == "failed"
+        artifact.status.isFailed
             ? Color.red.opacity(0.5)
             : Color(nsColor: .separatorColor)
     }
 
     /// Tooltip showing failure reason for failed artifacts.
     private var failureTooltip: String {
-        guard artifact.status == "failed" else { return "" }
+        guard artifact.status.isFailed else { return "" }
         return "Processing failed. Click the retry button to reprocess."
     }
 

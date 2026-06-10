@@ -1,22 +1,25 @@
 import SwiftUI
 
 /// A small status badge overlay displayed in the top-right corner of an artifact tile.
-/// Shows processing state (spinner for pending/processing, error icon for failed).
+/// Shows processing state (spinner for pending/processing, retry button for failed).
 struct StatusBadge: View {
-    let status: String
+    let status: ArtifactStatus
     let onRetry: () -> Void
 
     @State private var isRetrying = false
 
     var body: some View {
-        switch status {
-        case "pending", "processing":
-            loadingBadge
-        case "failed":
-            failedBadge
-        default:
-            EmptyView()
+        Group {
+            switch status {
+            case .pending, .processing:
+                loadingBadge
+            case .failed:
+                failedBadge
+            default:
+                EmptyView()
+            }
         }
+        .id(status)  // Force view identity reset when status changes
     }
 
     // MARK: - Loading Badge

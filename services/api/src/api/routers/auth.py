@@ -305,14 +305,14 @@ async def update_email(
     )
 
 
-@router.post("/me/password", response_model=MessageResponse)
+@router.post("/me/password", response_model=AuthResponse)
 async def change_password(
     body: ChangePasswordRequest,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     pool: Annotated[asyncpg.Pool, Depends(get_pool)],
     request: Request,
-) -> MessageResponse:
-    """Change password and revoke all existing sessions."""
+) -> AuthResponse:
+    """Change password, revoke all existing sessions, and issue new tokens for current device."""
     settings: Settings = request.app.state.settings
 
     try:
@@ -340,16 +340,30 @@ async def change_password(
     new_hash = hash_password(body.new_password, cost=settings.bcrypt_cost)
 
     async with pool.acquire() as conn:
-        await conn.execute(
+        row = await conn.fetchrow(
             """
             UPDATE auth.users
             SET password_hash = $2, tokens_revoked_at = now(), updated_at = now()
             WHERE id = $1
+            RETURNING id, email, created_at, updated_at
             """,
             current_user.id,
             new_hash,
         )
 
-    logger.info("password_changed", user_id=str(current_user.id))
+    # Issue fresh tokens so the current device stays logged in
+    user_id = str(current_user.id)
+    access_token, refresh_token, _jti = generate_tokens(user_id, settings)
 
-    return MessageResponse(message="Password changed successfully. All sessions revoked.")
+    logger.info("password_changed", user_id=user_id)
+
+    return AuthResponse(
+        user=UserResponse(
+            id=row["id"],
+            email=row["email"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        ),
+        access_token=access_token,
+        refresh_token=refresh_token,
+    )

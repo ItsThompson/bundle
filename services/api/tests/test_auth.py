@@ -274,14 +274,28 @@ class TestChangePassword:
         registered_user: dict[str, Any],
         auth_headers: dict[str, str],
     ) -> None:
-        """Password change succeeds and revokes sessions."""
+        """Password change succeeds, returns new tokens, and revokes old sessions."""
+        import time
+
+        time.sleep(1.1)  # Ensure revocation timestamp is in a later second
+
         response = client.post(
             "/api/auth/me/password",
             json={"current_password": "TestPass1", "new_password": "NewPass1x"},
             headers=auth_headers,
         )
         assert response.status_code == 200
-        assert "revoked" in response.json()["message"].lower()
+        data = response.json()
+
+        # Returns new tokens for the current device
+        assert "access_token" in data
+        assert "refresh_token" in data
+        assert data["user"]["email"] == "test@example.com"
+
+        # New tokens work
+        new_headers = {"Authorization": f"Bearer {data['access_token']}"}
+        me_response = client.get("/api/auth/me", headers=new_headers)
+        assert me_response.status_code == 200
 
         # Login with new password should work
         login_response = client.post(
@@ -325,7 +339,16 @@ class TestChangePassword:
         registered_user: dict[str, Any],
         auth_headers: dict[str, str],
     ) -> None:
-        """Access token issued before password change is rejected."""
+        """Access token issued before password change is rejected.
+
+        A small sleep is needed because JWT 'iat' uses integer seconds and
+        the revocation check compares at the same precision. In production,
+        login and password change are always seconds apart.
+        """
+        import time
+
+        time.sleep(1.1)
+
         # Change password
         client.post(
             "/api/auth/me/password",

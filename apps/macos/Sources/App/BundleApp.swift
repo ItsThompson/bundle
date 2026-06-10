@@ -19,7 +19,7 @@ struct BundleApp: App {
             Divider()
 
             Button("Settings") {
-                print("[Bundle] Settings selected")
+                appDelegate.openSettings()
             }
             .keyboardShortcut(",")
 

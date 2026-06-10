@@ -3,7 +3,7 @@
 set dotenv-load
 
 # Database URL for dbmate
-db_url := env("DATABASE_URL", "postgresql://bundle:bundle_dev@localhost:5432/bundle?sslmode=disable")
+db_url := env("DATABASE_URL", "postgresql://bundle:bundle_dev@localhost:5433/bundle?sslmode=disable")
 
 # Start development services (PostgreSQL + pgvector)
 dev:

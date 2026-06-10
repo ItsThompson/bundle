@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     # Database
-    database_url: str = "postgresql://bundle:bundle_dev@localhost:5432/bundle"
+    database_url: str = "postgresql://bundle:bundle_dev@localhost:5433/bundle"
 
     # Auth
     jwt_secret: str = "change-me-in-production"

@@ -43,6 +43,7 @@ async def upload_artifact(
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     pool: Annotated[asyncpg.Pool, Depends(get_pool)],
     request: Request,
+    content_text: Annotated[str | None, Form()] = None,
 ) -> ArtifactResponse:
     """Upload a new artifact (multipart: file + type + created_at).
 
@@ -97,6 +98,7 @@ async def upload_artifact(
         user_id=current_user.id,
         artifact_type=type,
         file_content=content,
+        content_text=content_text,
         created_at=parsed_created_at,
     )
 

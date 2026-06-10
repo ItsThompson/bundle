@@ -19,9 +19,12 @@ async def create_artifact(
     artifact_type: str,
     file_content: bytes,
     created_at: datetime,
+    content_text: str | None = None,
 ) -> dict:
     """Save artifact file to disk and create DB row.
 
+    For notes, the file content is stored in content_text for full-text search.
+    For links, content_text is the URL string passed explicitly.
     Returns the artifact record as a dict.
     """
     artifact_id = uuid.uuid4()
@@ -42,19 +45,25 @@ async def create_artifact(
         size_bytes=len(file_content),
     )
 
+    # Determine content_text: explicit value takes precedence,
+    # otherwise extract from file content for notes
+    if content_text is None and artifact_type == "note":
+        content_text = file_content.decode("utf-8", errors="replace")
+
     # Insert DB row
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
-            INSERT INTO artifacts (id, user_id, type, storage_path, status, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, 'pending', $5, $5)
-            RETURNING id, user_id, type, storage_path, status, attempts,
+            INSERT INTO artifacts (id, user_id, type, storage_path, content_text, status, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, 'pending', $6, $6)
+            RETURNING id, user_id, type, storage_path, content_text, status, attempts,
                       scheduled_after, created_at, updated_at
             """,
             artifact_id,
             user_id,
             artifact_type,
             relative_path,
+            content_text,
             created_at.astimezone(UTC),
         )
 

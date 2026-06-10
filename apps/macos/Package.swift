@@ -1,4 +1,4 @@
-// swift-tools-version: 5.9
+// swift-tools-version: 6.0
 
 import PackageDescription
 
@@ -11,7 +11,14 @@ let package = Package(
         .executableTarget(
             name: "Bundle",
             path: "Sources/App",
-            exclude: ["Info.plist"]
+            exclude: ["Info.plist"],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
+        .testTarget(
+            name: "BundleTests",
+            dependencies: ["Bundle"],
+            path: "Tests/BundleTests",
+            swiftSettings: [.swiftLanguageMode(.v5)]
         )
     ]
 )

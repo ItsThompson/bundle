@@ -1,6 +1,6 @@
 """Authentication middleware: JWT validation and current user extraction."""
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -69,11 +69,13 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Check if token was issued before revocation (without re-decoding)
+    # Check if token was issued before revocation
+    # Compare at integer-second precision since JWT 'iat' is an integer
     tokens_revoked_at = row["tokens_revoked_at"]
     if tokens_revoked_at is not None:
-        issued_at = datetime.fromtimestamp(payload["iat"], tz=UTC)
-        if issued_at < tokens_revoked_at:
+        token_iat_unix = payload["iat"]
+        revoked_at_unix = int(tokens_revoked_at.timestamp())
+        if token_iat_unix < revoked_at_unix:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Token has been revoked",

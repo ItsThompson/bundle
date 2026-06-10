@@ -150,7 +150,7 @@ final class PostCaptureThumbnail {
 
         let visibleFrame = screen.visibleFrame
         let origin = NSPoint(
-            x: visibleFrame.maxX - width - edgeMargin,
+            x: visibleFrame.minX + edgeMargin,
             y: visibleFrame.minY + edgeMargin
         )
 
@@ -189,9 +189,10 @@ enum ThumbnailTextUtils {
 
 // MARK: - Non-Activating Window
 
-/// NSWindow subclass that never becomes key or main.
-/// Used for the post-capture thumbnail overlay to avoid stealing focus.
-private class NonActivatingWindow: NSWindow {
+/// NSPanel subclass that never becomes key or main.
+/// Uses NSPanel (not NSWindow) so that first-click passes directly to
+/// buttons without requiring the window to become key first.
+private class NonActivatingWindow: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 }

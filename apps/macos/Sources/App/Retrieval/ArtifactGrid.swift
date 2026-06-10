@@ -1,23 +1,51 @@
+import Combine
 import SwiftUI
 
 /// Container view that manages artifact loading and displays the grid.
-/// Handles infinite scroll pagination, empty state, and retry actions.
+/// Handles infinite scroll pagination, search, and empty state.
 struct ArtifactGridContainer: View {
     let localDatabase: LocalDatabase
-    var onArtifactTap: ((Artifact) -> Void)?
+    @ObservedObject var syncService: SyncService
+    var onArtifactTap: ((Artifact) -> Void)? = nil
 
     @State private var artifacts: [Artifact] = []
     @State private var isLoading = false
     @State private var hasMore = true
     @State private var totalCount = 0
 
+    // Search state
+    @State private var searchText = ""
+    @State private var isSearching = false
+    @State private var searchResults: [Artifact] = []
+    @State private var searchDebounceTask: Task<Void, Never>?
+
     private let initialLoadCount = 40
     private let pageSize = 20
-    private let artifactAPIService = ArtifactAPIService()
+    private let debounceInterval: Duration = .milliseconds(300)
+    private let searchService = SearchService()
 
     var body: some View {
         VStack(spacing: 0) {
-            if artifacts.isEmpty && !isLoading {
+            // Search bar at top
+            SearchBar(
+                searchText: $searchText,
+                onClear: clearSearch
+            )
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+            .padding(.bottom, 8)
+            .onChange(of: searchText) { _, newValue in
+                handleSearchTextChange(newValue)
+            }
+
+            // Content area
+            if isSearching {
+                searchLoadingView
+            } else if !searchText.isEmpty && searchResults.isEmpty && !isLoading {
+                noMatchesView
+            } else if !searchText.isEmpty {
+                searchResultsGrid
+            } else if artifacts.isEmpty && !isLoading {
                 emptyState
             } else {
                 artifactScrollView
@@ -34,6 +62,12 @@ struct ArtifactGridContainer: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .onAppear { loadInitialArtifacts() }
+        .onChange(of: syncService.isSyncing) { wasSyncing, isSyncing in
+            // Reload chronological data after sync completes
+            if wasSyncing && !isSyncing && searchText.isEmpty {
+                loadInitialArtifacts()
+            }
+        }
     }
 
     // MARK: - Empty State
@@ -57,7 +91,63 @@ struct ArtifactGridContainer: View {
         .padding(40)
     }
 
-    // MARK: - Scroll View with Grid
+    // MARK: - No Matches View
+
+    private var noMatchesView: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 48))
+                .foregroundColor(.secondary)
+
+            Text("No matches found")
+                .font(.title2)
+                .fontWeight(.medium)
+
+            Text("Try a different search term")
+                .font(.body)
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(40)
+    }
+
+    // MARK: - Search Loading (Skeleton Tiles)
+
+    private var searchLoadingView: some View {
+        ScrollView {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 150))],
+                spacing: 12
+            ) {
+                ForEach(0..<8, id: \.self) { _ in
+                    SkeletonTile()
+                }
+            }
+            .padding(16)
+        }
+    }
+
+    // MARK: - Search Results Grid
+
+    private var searchResultsGrid: some View {
+        ScrollView {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 150))],
+                spacing: 12
+            ) {
+                ForEach(searchResults) { artifact in
+                    ArtifactTile(
+                        artifact: artifact,
+                        onTap: { onArtifactTap?(artifact) },
+                        onRetry: { _ in }
+                    )
+                }
+            }
+            .padding(16)
+        }
+    }
+
+    // MARK: - Scroll View with Grid (Chronological)
 
     private var artifactScrollView: some View {
         ScrollView {
@@ -69,7 +159,7 @@ struct ArtifactGridContainer: View {
                     ArtifactTile(
                         artifact: artifact,
                         onTap: { onArtifactTap?(artifact) },
-                        onRetry: { id in retryArtifact(id: id) }
+                        onRetry: { _ in }
                     )
                     .onAppear {
                         checkLoadMore(artifact: artifact)
@@ -85,54 +175,69 @@ struct ArtifactGridContainer: View {
         }
     }
 
-    // MARK: - Retry
+    // MARK: - Search Logic
 
-    /// Trigger retry for a failed artifact via the backend.
-    /// Updates the local tile status immediately for instant feedback.
-    private func retryArtifact(id: String) {
-        // Optimistically update local status to "pending"
-        if let index = artifacts.firstIndex(where: { $0.id == id }) {
-            artifacts[index] = Artifact(
-                id: artifacts[index].id,
-                type: artifacts[index].type,
-                contentPath: artifacts[index].contentPath,
-                contentText: artifacts[index].contentText,
-                status: "pending",
-                createdAt: artifacts[index].createdAt,
-                syncedAt: artifacts[index].syncedAt,
-                tags: artifacts[index].tags
-            )
+    private func handleSearchTextChange(_ newValue: String) {
+        // Cancel previous debounce task
+        searchDebounceTask?.cancel()
+
+        let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if trimmed.isEmpty {
+            clearSearch()
+            return
         }
 
-        // Update local SQLite
-        try? localDatabase.updateArtifactStatus(id: id, status: "pending")
+        // Debounce: wait 300ms before firing search
+        searchDebounceTask = Task {
+            try? await Task.sleep(for: debounceInterval)
 
-        // Call backend retry endpoint
-        Task {
-            do {
-                _ = try await artifactAPIService.retryArtifact(id: id)
-                print("[Bundle] Retry requested for artifact \(id)")
-            } catch {
-                print("[Bundle] Retry failed for artifact \(id): \(error)")
-                // Revert optimistic update on failure
-                if let index = artifacts.firstIndex(where: { $0.id == id }) {
-                    artifacts[index] = Artifact(
-                        id: artifacts[index].id,
-                        type: artifacts[index].type,
-                        contentPath: artifacts[index].contentPath,
-                        contentText: artifacts[index].contentText,
-                        status: "failed",
-                        createdAt: artifacts[index].createdAt,
-                        syncedAt: artifacts[index].syncedAt,
-                        tags: artifacts[index].tags
-                    )
-                }
-                try? localDatabase.updateArtifactStatus(id: id, status: "failed")
-            }
+            // Check if task was cancelled during sleep
+            guard !Task.isCancelled else { return }
+
+            await performSearch(query: trimmed)
         }
     }
 
-    // MARK: - Data Loading
+    private func clearSearch() {
+        searchDebounceTask?.cancel()
+        searchResults = []
+        isSearching = false
+    }
+
+    @MainActor
+    private func performSearch(query: String) async {
+        isSearching = true
+
+        do {
+            let response = try await searchService.search(query: query)
+
+            // Only update if search text hasn't changed during the request
+            let currentTrimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard currentTrimmed == query else { return }
+
+            searchResults = response.items.map { item in
+                let type = ArtifactType(rawValue: item.type) ?? .screenshot
+                return Artifact(
+                    id: item.id,
+                    type: type,
+                    contentPath: nil,
+                    contentText: item.contentText,
+                    status: item.status,
+                    createdAt: item.createdAt,
+                    syncedAt: nil,
+                    tags: item.tags
+                )
+            }
+        } catch {
+            print("[Bundle] Search failed: \(error.localizedDescription)")
+            searchResults = []
+        }
+
+        isSearching = false
+    }
+
+    // MARK: - Data Loading (Chronological)
 
     private func loadInitialArtifacts() {
         guard !isLoading else { return }
@@ -187,13 +292,6 @@ struct ArtifactGridContainer: View {
         }
     }
 
-    // MARK: - Refresh (called by sync)
-
-    /// Reload artifacts from local database. Call after sync updates SQLite.
-    func refreshArtifacts() {
-        loadInitialArtifacts()
-    }
-
     // MARK: - Mapping
 
     private static let isoFormatter = ISO8601DateFormatter()
@@ -213,5 +311,34 @@ struct ArtifactGridContainer: View {
             syncedAt: syncedDate,
             tags: tags
         )
+    }
+}
+
+// MARK: - Skeleton Tile
+
+/// Placeholder tile shown during search loading.
+struct SkeletonTile: View {
+    @State private var isAnimating = false
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 8)
+            .fill(
+                LinearGradient(
+                    colors: [
+                        Color(nsColor: .controlBackgroundColor),
+                        Color(nsColor: .controlBackgroundColor).opacity(0.5),
+                        Color(nsColor: .controlBackgroundColor),
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+            .frame(height: 150)
+            .opacity(isAnimating ? 0.6 : 1.0)
+            .animation(
+                .easeInOut(duration: 1.0).repeatForever(autoreverses: true),
+                value: isAnimating
+            )
+            .onAppear { isAnimating = true }
     }
 }

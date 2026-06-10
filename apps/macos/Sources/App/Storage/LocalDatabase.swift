@@ -69,6 +69,13 @@ final class LocalDatabase {
             )
         """)
 
+        try execute("""
+            CREATE TABLE IF NOT EXISTS sync_state (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+        """)
+
         try execute("CREATE INDEX IF NOT EXISTS idx_artifacts_created_at ON artifacts(created_at DESC)")
         try execute("CREATE INDEX IF NOT EXISTS idx_artifacts_status ON artifacts(status)")
         try execute("CREATE INDEX IF NOT EXISTS idx_tags_artifact_id ON tags(artifact_id)")
@@ -240,6 +247,92 @@ final class LocalDatabase {
             guard sqlite3_step(stmt) == SQLITE_DONE else {
                 throw LocalDatabaseError.insertFailed(lastError)
             }
+        }
+    }
+
+    // MARK: - Sync Operations
+
+    /// Insert or update an artifact from a backend sync response.
+    /// Uses INSERT OR REPLACE to handle both new and existing artifacts.
+    func upsertArtifactFromSync(
+        id: String,
+        type: String,
+        contentText: String?,
+        status: String,
+        createdAt: Date,
+        syncedAt: Date
+    ) throws {
+        let sql = """
+            INSERT INTO artifacts (id, type, content_text, status, created_at, synced_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                status = excluded.status,
+                content_text = excluded.content_text,
+                synced_at = excluded.synced_at
+        """
+        let dateFormatter = ISO8601DateFormatter()
+        let createdAtStr = dateFormatter.string(from: createdAt)
+        let syncedAtStr = dateFormatter.string(from: syncedAt)
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw LocalDatabaseError.prepareFailed(lastError)
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_text(stmt, 1, (id as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(stmt, 2, (type as NSString).utf8String, -1, nil)
+
+        if let text = contentText {
+            sqlite3_bind_text(stmt, 3, (text as NSString).utf8String, -1, nil)
+        } else {
+            sqlite3_bind_null(stmt, 3)
+        }
+
+        sqlite3_bind_text(stmt, 4, (status as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(stmt, 5, (createdAtStr as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(stmt, 6, (syncedAtStr as NSString).utf8String, -1, nil)
+
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw LocalDatabaseError.insertFailed(lastError)
+        }
+    }
+
+    /// Get the last sync timestamp from sync_state table.
+    func getLastSyncTimestamp() throws -> Date? {
+        let sql = "SELECT value FROM sync_state WHERE key = 'last_sync_timestamp'"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw LocalDatabaseError.prepareFailed(lastError)
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        guard sqlite3_step(stmt) == SQLITE_ROW else {
+            return nil
+        }
+
+        guard let value = columnText(stmt, 0) else { return nil }
+        return ISO8601DateFormatter().date(from: value)
+    }
+
+    /// Set the last sync timestamp in sync_state table.
+    func setLastSyncTimestamp(_ date: Date) throws {
+        let sql = """
+            INSERT INTO sync_state (key, value) VALUES ('last_sync_timestamp', ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        """
+        let dateStr = ISO8601DateFormatter().string(from: date)
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw LocalDatabaseError.prepareFailed(lastError)
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_text(stmt, 1, (dateStr as NSString).utf8String, -1, nil)
+
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw LocalDatabaseError.insertFailed(lastError)
         }
     }
 

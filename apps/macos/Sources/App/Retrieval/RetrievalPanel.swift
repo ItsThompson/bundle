@@ -9,9 +9,12 @@ final class RetrievalPanel {
     private var clickMonitor: Any?
     private var keyMonitor: Any?
     private let localDatabase: LocalDatabase
+    private let syncService: SyncService
+    private let navigationState = RetrievalNavigationState()
 
-    init(localDatabase: LocalDatabase) {
+    init(localDatabase: LocalDatabase, syncService: SyncService? = nil) {
         self.localDatabase = localDatabase
+        self.syncService = syncService ?? SyncService(localDatabase: localDatabase)
     }
 
     var isVisible: Bool {
@@ -27,10 +30,12 @@ final class RetrievalPanel {
 
         createPanel()
         installDismissMonitors()
+        syncService.start()
     }
 
     /// Dismiss the retrieval panel.
     func dismiss() {
+        syncService.stop()
         removeDismissMonitors()
         panel?.orderOut(nil)
         panel = nil
@@ -73,7 +78,7 @@ final class RetrievalPanel {
         panel.hasShadow = true
         panel.hidesOnDeactivate = false
 
-        let contentView = ArtifactGridContainer(localDatabase: localDatabase)
+        let contentView = RetrievalContentView(localDatabase: localDatabase, syncService: syncService, navigationState: navigationState)
         let hostingView = NSHostingView(rootView: contentView)
         hostingView.frame = NSRect(x: 0, y: 0, width: width, height: height)
         panel.contentView = hostingView
@@ -97,10 +102,15 @@ final class RetrievalPanel {
             }
         }
 
-        // Escape key dismisses
+        // Escape key: navigates back from detail, or dismisses panel from grid
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             if event.keyCode == 53 { // kVK_Escape
-                self?.dismiss()
+                guard let self = self else { return event }
+                if self.navigationState.isShowingDetail {
+                    self.navigationState.onBack?()
+                } else {
+                    self.dismiss()
+                }
                 return nil
             }
             return event

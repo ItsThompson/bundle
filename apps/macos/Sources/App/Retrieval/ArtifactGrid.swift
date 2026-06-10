@@ -136,10 +136,12 @@ struct ArtifactGridContainer: View {
 
     // MARK: - Mapping
 
+    private static let isoFormatter = ISO8601DateFormatter()
+
     private func mapToArtifact(local: LocalArtifact, tags: [String]) -> Artifact {
         let type = ArtifactType(rawValue: local.type) ?? .screenshot
-        let date = ISO8601DateFormatter().date(from: local.createdAt) ?? Date()
-        let syncedDate: Date? = local.syncedAt.flatMap { ISO8601DateFormatter().date(from: $0) }
+        let date = Self.isoFormatter.date(from: local.createdAt) ?? Date()
+        let syncedDate: Date? = local.syncedAt.flatMap { Self.isoFormatter.date(from: $0) }
 
         return Artifact(
             id: local.id,

@@ -168,9 +168,32 @@ final class LocalDatabase {
             SELECT id, type, content_path, content_text, status, created_at, synced_at
             FROM artifacts
             ORDER BY created_at DESC
-            LIMIT \(limit) OFFSET \(offset)
+            LIMIT ? OFFSET ?
         """
-        return try queryArtifacts(sql: sql)
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw LocalDatabaseError.prepareFailed(lastError)
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_int(stmt, 1, Int32(limit))
+        sqlite3_bind_int(stmt, 2, Int32(offset))
+
+        var artifacts: [LocalArtifact] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let artifact = LocalArtifact(
+                id: columnText(stmt, 0) ?? "",
+                type: columnText(stmt, 1) ?? "",
+                contentPath: columnText(stmt, 2),
+                contentText: columnText(stmt, 3),
+                status: columnText(stmt, 4) ?? "pending",
+                createdAt: columnText(stmt, 5) ?? "",
+                syncedAt: columnText(stmt, 6)
+            )
+            artifacts.append(artifact)
+        }
+        return artifacts
     }
 
     /// Get tags for a list of artifact IDs.

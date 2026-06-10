@@ -41,6 +41,16 @@ final class ArtifactModelTests: XCTestCase {
         XCTAssertEqual(result, "3 days ago")
     }
 
+    func testOlderThanOneWeek() {
+        let date = Date().addingTimeInterval(-864000) // 10 days ago
+        let result = RelativeTimestampFormatter.format(date)
+        // Falls back to DateFormatter medium style (e.g. "May 31, 2026")
+        XCTAssertFalse(result.contains("ago"))
+        XCTAssertFalse(result.contains("yesterday"))
+        // Should be a formatted date string, not empty
+        XCTAssertFalse(result.isEmpty)
+    }
+
     // MARK: - Artifact Domain Extraction Tests
 
     func testDomainExtractionFromLink() {

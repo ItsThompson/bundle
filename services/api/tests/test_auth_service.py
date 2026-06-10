@@ -24,7 +24,7 @@ def settings() -> Settings:
     """Create test settings with known values."""
     return Settings(
         database_url="postgresql://test:test@localhost/test",
-        jwt_secret="test-secret-key-for-testing",
+        jwt_secret="test-secret-key-minimum-32-chars!",
         jwt_access_ttl_minutes=15,
         jwt_refresh_ttl_days=7,
         bcrypt_cost=4,  # Low cost for fast tests
@@ -128,7 +128,7 @@ class TestAccessToken:
 
         wrong_settings = Settings(
             database_url="postgresql://test:test@localhost/test",
-            jwt_secret="wrong-secret",
+            jwt_secret="wrong-secret-but-still-32-chars!",
         )
         with pytest.raises(TokenError, match="Invalid token"):
             decode_access_token(token, wrong_settings)

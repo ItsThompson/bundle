@@ -2,6 +2,7 @@
 
 import time
 from collections import defaultdict
+from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -194,8 +195,6 @@ async def refresh(
             )
 
         # Blacklist the old refresh token
-        from datetime import UTC, datetime
-
         await conn.execute(
             """
             INSERT INTO auth.refresh_token_blacklist (jti, user_id, expires_at)
@@ -238,8 +237,6 @@ async def logout(
     jti = payload["jti"]
     exp = payload["exp"]
 
-    from datetime import UTC, datetime
-
     async with pool.acquire() as conn:
         await conn.execute(
             """
@@ -260,23 +257,13 @@ async def logout(
 @router.get("/me", response_model=UserResponse)
 async def get_me(
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
-    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
 ) -> UserResponse:
     """Get current user profile."""
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT id, email, created_at, updated_at FROM auth.users WHERE id = $1",
-            current_user.id,
-        )
-
-    if row is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-
     return UserResponse(
-        id=row["id"],
-        email=row["email"],
-        created_at=row["created_at"],
-        updated_at=row["updated_at"],
+        id=current_user.id,
+        email=current_user.email,
+        created_at=current_user.created_at,
+        updated_at=current_user.updated_at,
     )
 
 

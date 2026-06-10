@@ -1,6 +1,6 @@
 """Authentication middleware: JWT validation and current user extraction."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -18,10 +18,19 @@ security = HTTPBearer()
 class CurrentUser:
     """Represents the authenticated user extracted from JWT."""
 
-    def __init__(self, id: UUID, email: str, tokens_revoked_at: datetime | None) -> None:
+    def __init__(
+        self,
+        id: UUID,
+        email: str,
+        tokens_revoked_at: datetime | None,
+        created_at: datetime,
+        updated_at: datetime,
+    ) -> None:
         self.id = id
         self.email = email
         self.tokens_revoked_at = tokens_revoked_at
+        self.created_at = created_at
+        self.updated_at = updated_at
 
 
 async def get_current_user(
@@ -49,7 +58,7 @@ async def get_current_user(
 
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT id, email, tokens_revoked_at FROM auth.users WHERE id = $1",
+            "SELECT id, email, tokens_revoked_at, created_at, updated_at FROM auth.users WHERE id = $1",
             UUID(user_id),
         )
 
@@ -60,20 +69,21 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Check if token was issued before revocation
+    # Check if token was issued before revocation (without re-decoding)
     tokens_revoked_at = row["tokens_revoked_at"]
     if tokens_revoked_at is not None:
-        try:
-            decode_access_token(token, settings, tokens_revoked_at=tokens_revoked_at)
-        except TokenError as e:
+        issued_at = datetime.fromtimestamp(payload["iat"], tz=UTC)
+        if issued_at < tokens_revoked_at:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=e.message,
+                detail="Token has been revoked",
                 headers={"WWW-Authenticate": "Bearer"},
-            ) from None
+            )
 
     return CurrentUser(
         id=row["id"],
         email=row["email"],
         tokens_revoked_at=tokens_revoked_at,
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
     )

@@ -30,9 +30,6 @@ class TokenError(Exception):
         super().__init__(message)
 
 
-PASSWORD_PATTERN = re.compile(r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,72}$")
-
-
 def validate_password_strength(password: str) -> None:
     """Validate password meets strength requirements.
 

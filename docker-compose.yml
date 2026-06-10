@@ -1,0 +1,46 @@
+name: bundle
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    container_name: bundle-api
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-bundle}:${POSTGRES_PASSWORD:-bundle_dev}@postgres:5432/${POSTGRES_DB:-bundle}
+      JWT_SECRET: ${JWT_SECRET}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      ARTIFACTS_PATH: /opt/bundle/artifacts
+      DB_POOL_MIN_SIZE: ${DB_POOL_MIN_SIZE:-2}
+      DB_POOL_MAX_SIZE: ${DB_POOL_MAX_SIZE:-10}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    volumes:
+      - artifacts:/opt/bundle/artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: bundle-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-bundle}
+      POSTGRES_USER: ${POSTGRES_USER:-bundle}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bundle_dev}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-bundle}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  artifacts:

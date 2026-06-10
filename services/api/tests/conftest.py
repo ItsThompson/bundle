@@ -104,6 +104,32 @@ def _setup_test_db() -> Generator[None, None, None]:
                     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
                 )
             """)
+            # Ensure search_vector column exists (may be missing from prior schema)
+            await conn.execute("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'artifacts' AND column_name = 'search_vector'
+                    ) THEN
+                        ALTER TABLE artifacts ADD COLUMN search_vector tsvector
+                            GENERATED ALWAYS AS (
+                                to_tsvector('english', COALESCE(content_text, ''))
+                            ) STORED;
+                    END IF;
+                END $$
+            """)
+            # Ensure GIN index exists for full-text search
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_artifacts_fts
+                ON artifacts USING gin(search_vector)
+            """)
+            # Ensure HNSW index exists for vector search
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_embeddings_hnsw
+                ON artifact_embeddings USING hnsw (embedding vector_cosine_ops)
+                WITH (m = 16, ef_construction = 64)
+            """)
         finally:
             await conn.close()
 

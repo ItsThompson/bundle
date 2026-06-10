@@ -43,6 +43,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         tagger = Tagger(provider=llm_provider)
         embedder = Embedder(provider=embedding_provider)
 
+        # Store embedding provider on app state for search endpoint
+        app.state.embedding_provider = embedding_provider
+
         worker = ProcessingWorker(
             pool=app.state.pool,
             settings=settings,

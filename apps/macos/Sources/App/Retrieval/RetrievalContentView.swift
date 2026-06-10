@@ -11,7 +11,7 @@ final class RetrievalNavigationState: ObservableObject {
 
 /// Root content view for the retrieval panel. Manages navigation between
 /// the artifact grid and the artifact detail view.
-/// Preserves grid scroll position when navigating to/from detail.
+/// Keeps the grid in the view tree (hidden) to preserve scroll position on back navigation.
 struct RetrievalContentView: View {
     let localDatabase: LocalDatabase
     @ObservedObject var syncService: SyncService
@@ -20,22 +20,25 @@ struct RetrievalContentView: View {
     @State private var selectedArtifact: Artifact?
 
     var body: some View {
-        Group {
+        ZStack {
+            // Grid stays in the tree to preserve scroll position
+            ArtifactGridContainer(
+                localDatabase: localDatabase,
+                syncService: syncService,
+                onArtifactTap: { artifact in
+                    handleArtifactTap(artifact)
+                }
+            )
+            .opacity(selectedArtifact == nil ? 1 : 0)
+            .allowsHitTesting(selectedArtifact == nil)
+
+            // Detail view overlays when an artifact is selected
             if let artifact = selectedArtifact {
                 ArtifactDetailView(artifact: artifact, onBack: navigateBack)
-                    .transition(.move(edge: .trailing))
-            } else {
-                ArtifactGridContainer(
-                    localDatabase: localDatabase,
-                    syncService: syncService,
-                    onArtifactTap: { artifact in
-                        handleArtifactTap(artifact)
-                    }
-                )
-                .transition(.move(edge: .leading))
+                    .transition(.opacity)
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: selectedArtifact?.id)
+        .animation(.easeInOut(duration: 0.15), value: selectedArtifact?.id)
     }
 
     // MARK: - Navigation

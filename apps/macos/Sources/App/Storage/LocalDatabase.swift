@@ -162,6 +162,64 @@ final class LocalDatabase {
         return Int(sqlite3_column_int(stmt, 0))
     }
 
+    /// Get artifacts ordered by created_at DESC with pagination.
+    func getArtifacts(limit: Int, offset: Int) throws -> [LocalArtifact] {
+        let sql = """
+            SELECT id, type, content_path, content_text, status, created_at, synced_at
+            FROM artifacts
+            ORDER BY created_at DESC
+            LIMIT \(limit) OFFSET \(offset)
+        """
+        return try queryArtifacts(sql: sql)
+    }
+
+    /// Get tags for a list of artifact IDs.
+    func getTagsForArtifacts(ids: [String]) throws -> [String: [String]] {
+        guard !ids.isEmpty else { return [:] }
+
+        let placeholders = ids.map { "'\($0.replacingOccurrences(of: "'", with: "''"))'" }.joined(separator: ", ")
+        let sql = "SELECT artifact_id, name FROM tags WHERE artifact_id IN (\(placeholders))"
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw LocalDatabaseError.prepareFailed(lastError)
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        var result: [String: [String]] = [:]
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let artifactId = columnText(stmt, 0) ?? ""
+            let tagName = columnText(stmt, 1) ?? ""
+            result[artifactId, default: []].append(tagName)
+        }
+        return result
+    }
+
+    /// Insert or update tags for an artifact.
+    func upsertTags(artifactId: String, tags: [String]) throws {
+        // Delete existing tags
+        try execute("DELETE FROM tags WHERE artifact_id = '\(artifactId.replacingOccurrences(of: "'", with: "''"))'")
+
+        // Insert new tags
+        for tag in tags {
+            let sql = "INSERT OR IGNORE INTO tags (id, artifact_id, name) VALUES (?, ?, ?)"
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                throw LocalDatabaseError.prepareFailed(lastError)
+            }
+            defer { sqlite3_finalize(stmt) }
+
+            let tagId = UUID().uuidString
+            sqlite3_bind_text(stmt, 1, (tagId as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(stmt, 2, (artifactId as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(stmt, 3, (tag as NSString).utf8String, -1, nil)
+
+            guard sqlite3_step(stmt) == SQLITE_DONE else {
+                throw LocalDatabaseError.insertFailed(lastError)
+            }
+        }
+    }
+
     // MARK: - Private Helpers
 
     private func execute(_ sql: String) throws {

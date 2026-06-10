@@ -3,8 +3,12 @@ import AppKit
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsPanel: SettingsPanel?
+    private var retrievalPanel: RetrievalPanel?
     private let capturePalette = CapturePalette()
     private let screenshotCapture = ScreenshotCapture()
+    private let noteEditor = NoteEditor()
+    private let linkInput = LinkInput()
+    private let postCaptureThumbnail = PostCaptureThumbnail()
     private let localDatabase = LocalDatabase()
     private let artifactUploadService = ArtifactUploadService()
 
@@ -23,6 +27,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 (try? self?.localDatabase.getArtifactCount()) ?? 0
             }
         )
+
+        // Initialize retrieval panel
+        retrievalPanel = RetrievalPanel(localDatabase: localDatabase)
 
         // Open local database
         do {
@@ -47,6 +54,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsPanel?.toggle()
     }
 
+    func showRetrievalPanel() {
+        retrievalPanel?.toggle()
+    }
+
     // MARK: - Hotkey Handler
 
     private func handleHotkeyPressed() {
@@ -62,11 +73,110 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .screenshot:
             startScreenshotCapture()
         case .note:
-            // Implemented in ticket #7
-            print("[Bundle] Note capture not yet implemented")
+            startNoteCapture()
         case .link:
-            // Implemented in ticket #8
-            print("[Bundle] Link capture not yet implemented")
+            startLinkCapture()
+        }
+    }
+
+    private func startNoteCapture() {
+        noteEditor.show { [weak self] result in
+            guard let self = self else { return }
+            self.handleNoteCaptureResult(result)
+        }
+    }
+
+    private func handleNoteCaptureResult(_ result: NoteCaptureResult) {
+        // 1. Insert into local SQLite with status "pending"
+        do {
+            let relativePath = result.filePath.lastPathComponent
+            try localDatabase.insertArtifact(
+                id: result.artifactId,
+                type: "note",
+                contentPath: relativePath,
+                contentText: result.content,
+                status: "pending",
+                createdAt: result.createdAt
+            )
+        } catch {
+            print("[Bundle] Failed to insert note artifact into local DB: \(error)")
+        }
+
+        // 2. Show post-capture thumbnail
+        showPostCaptureThumbnail(
+            content: .note(text: result.content),
+            artifactId: result.artifactId
+        )
+
+        // 3. Upload to backend asynchronously (non-blocking)
+        Task {
+            let response = await artifactUploadService.uploadArtifact(
+                fileURL: result.filePath,
+                type: "note",
+                createdAt: result.createdAt
+            )
+
+            if let response = response {
+                try? localDatabase.updateArtifactStatus(
+                    id: result.artifactId,
+                    status: response.status
+                )
+                print("[Bundle] Note uploaded: \(response.id)")
+            } else {
+                print("[Bundle] Note upload failed, will retry later")
+            }
+        }
+    }
+
+    // MARK: - Link Capture
+
+    private func startLinkCapture() {
+        linkInput.show { [weak self] url in
+            guard let self = self else { return }
+            self.handleLinkCaptured(url)
+        }
+    }
+
+    private func handleLinkCaptured(_ url: String) {
+        let artifactId = UUID().uuidString
+        let createdAt = Date()
+
+        // 1. Insert into local SQLite with type "link", content_text = URL
+        do {
+            try localDatabase.insertArtifact(
+                id: artifactId,
+                type: "link",
+                contentPath: nil,
+                contentText: url,
+                status: "pending",
+                createdAt: createdAt
+            )
+        } catch {
+            print("[Bundle] Failed to insert link artifact into local DB: \(error)")
+        }
+
+        // 2. Show post-capture thumbnail
+        showPostCaptureThumbnail(
+            content: .link(url: url),
+            artifactId: artifactId
+        )
+
+        // 3. Upload to backend asynchronously (non-blocking)
+        Task {
+            let response = await artifactUploadService.uploadLink(
+                url: url,
+                createdAt: createdAt
+            )
+
+            if let response = response {
+                try? localDatabase.updateArtifactStatus(
+                    id: artifactId,
+                    status: response.status
+                )
+                print("[Bundle] Link uploaded: \(response.id)")
+            } else {
+                print("[Bundle] Link upload failed, will retry later")
+            }
         }
     }
 
@@ -93,7 +203,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             print("[Bundle] Failed to insert artifact into local DB: \(error)")
         }
 
-        // 2. Upload to backend asynchronously (non-blocking)
+        // 2. Show post-capture thumbnail
+        showPostCaptureThumbnail(
+            content: .screenshot(thumbnailPath: result.thumbnailPath),
+            artifactId: result.artifactId
+        )
+
+        // 3. Upload to backend asynchronously (non-blocking)
         Task {
             let response = await artifactUploadService.uploadArtifact(
                 fileURL: result.fullPath,
@@ -113,5 +229,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 print("[Bundle] Screenshot upload failed, will retry later")
             }
         }
+    }
+
+    // MARK: - Post-Capture Thumbnail
+
+    private func showPostCaptureThumbnail(content: ThumbnailContent, artifactId: String) {
+        postCaptureThumbnail.onCopy = { [weak self] thumbnailContent in
+            self?.copyContentToClipboard(thumbnailContent)
+        }
+        postCaptureThumbnail.onAddNote = { [weak self] id in
+            self?.openNoteEditorForArtifact(id)
+        }
+        postCaptureThumbnail.show(content: content, artifactId: artifactId)
+    }
+
+    private func copyContentToClipboard(_ content: ThumbnailContent) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+
+        switch content {
+        case .screenshot(let thumbnailPath):
+            // Copy full-resolution image (derive from thumbnail path)
+            let fullPath = thumbnailPath.deletingLastPathComponent()
+                .appendingPathComponent(
+                    thumbnailPath.lastPathComponent.replacingOccurrences(of: "_thumb", with: "")
+                )
+            if let image = NSImage(contentsOf: fullPath) {
+                pasteboard.writeObjects([image])
+            } else if let image = NSImage(contentsOf: thumbnailPath) {
+                pasteboard.writeObjects([image])
+            }
+        case .note(let text):
+            pasteboard.setString(text, forType: .string)
+        case .link(let url):
+            pasteboard.setString(url, forType: .string)
+        }
+    }
+
+    private func openNoteEditorForArtifact(_ artifactId: String) {
+        // TODO: Open note editor pre-linked to artifact (future ticket)
+        print("[Bundle] Add Note for artifact: \(artifactId)")
     }
 }

@@ -12,7 +12,7 @@ struct BundleApp: App {
             .keyboardShortcut("1")
 
             Button("Show Artifacts") {
-                print("[Bundle] Show Artifacts selected")
+                appDelegate.showRetrievalPanel()
             }
             .keyboardShortcut("2")
 

@@ -16,23 +16,36 @@ struct TagFilterBar: View {
     let selectedTag: String?
     let onSelectTag: (String?) -> Void
 
-    @State private var scrollOffset: CGFloat = 0
+    /// Index used to drive arrow-button scrolling via ScrollViewReader.
+    @State private var scrollTarget: String?
     @State private var contentWidth: CGFloat = 0
     @State private var containerWidth: CGFloat = 0
+    @State private var scrollOffset: CGFloat = 0
+
+    private var hasOverflow: Bool {
+        contentWidth > containerWidth
+    }
 
     private var canScrollLeft: Bool {
-        scrollOffset > 0
+        scrollOffset > 1
     }
 
     private var canScrollRight: Bool {
-        contentWidth > containerWidth && scrollOffset < contentWidth - containerWidth
+        hasOverflow && scrollOffset < (contentWidth - containerWidth - 1)
+    }
+
+    /// All tag IDs in display order for arrow navigation.
+    private var tagIds: [String] {
+        var ids = ["tag-all"]
+        ids.append(contentsOf: tags.map { "tag-\($0.name)" })
+        return ids
     }
 
     var body: some View {
         HStack(spacing: 0) {
             // Left arrow
             if canScrollLeft {
-                scrollArrowButton(direction: .left)
+                arrowButton(direction: .left)
             }
 
             // Scrollable tag pills
@@ -61,39 +74,49 @@ struct TagFilterBar: View {
                     .padding(.horizontal, 4)
                     .background(
                         GeometryReader { geo in
-                            Color.clear.preference(
-                                key: ContentWidthPreferenceKey.self,
-                                value: geo.size.width
-                            )
+                            Color.clear
+                                .preference(
+                                    key: ContentWidthKey.self,
+                                    value: geo.size.width
+                                )
+                                .preference(
+                                    key: ScrollOffsetKey.self,
+                                    value: -geo.frame(in: .named("tagScroll")).origin.x
+                                )
                         }
                     )
                 }
+                .coordinateSpace(name: "tagScroll")
                 .background(
                     GeometryReader { geo in
                         Color.clear.preference(
-                            key: ContainerWidthPreferenceKey.self,
+                            key: ContainerWidthKey.self,
                             value: geo.size.width
                         )
                     }
                 )
-                .onPreferenceChange(ContentWidthPreferenceKey.self) { value in
-                    contentWidth = value
-                }
-                .onPreferenceChange(ContainerWidthPreferenceKey.self) { value in
-                    containerWidth = value
-                }
+                .onPreferenceChange(ContentWidthKey.self) { contentWidth = $0 }
+                .onPreferenceChange(ContainerWidthKey.self) { containerWidth = $0 }
+                .onPreferenceChange(ScrollOffsetKey.self) { scrollOffset = $0 }
                 .onChange(of: selectedTag) { _, newTag in
-                    // Auto-scroll selected tag into view
                     let tagId = newTag.map { "tag-\($0)" } ?? "tag-all"
                     withAnimation(.easeInOut(duration: 0.2)) {
                         proxy.scrollTo(tagId, anchor: .center)
                     }
                 }
+                .onChange(of: scrollTarget) { _, target in
+                    guard let target else { return }
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        proxy.scrollTo(target, anchor: .center)
+                    }
+                    // Reset so the same target can be triggered again
+                    scrollTarget = nil
+                }
             }
 
             // Right arrow
             if canScrollRight {
-                scrollArrowButton(direction: .right)
+                arrowButton(direction: .right)
             }
         }
     }
@@ -104,8 +127,10 @@ struct TagFilterBar: View {
         case left, right
     }
 
-    private func scrollArrowButton(direction: ScrollDirection) -> some View {
-        Button(action: {}) {
+    private func arrowButton(direction: ScrollDirection) -> some View {
+        Button {
+            scrollByDirection(direction)
+        } label: {
             Image(systemName: direction == .left ? "chevron.left" : "chevron.right")
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundColor(.secondary)
@@ -113,9 +138,38 @@ struct TagFilterBar: View {
         }
         .buttonStyle(.plain)
     }
+
+    /// Scroll approximately 3 tags in the given direction.
+    private func scrollByDirection(_ direction: ScrollDirection) {
+        let ids = tagIds
+        guard !ids.isEmpty else { return }
+
+        // Estimate visible tag count and skip ~3 tags per arrow press
+        let step = 3
+        let currentIndex = approximateVisibleIndex(ids: ids)
+
+        let targetIndex: Int
+        switch direction {
+        case .left:
+            targetIndex = max(0, currentIndex - step)
+        case .right:
+            targetIndex = min(ids.count - 1, currentIndex + step)
+        }
+
+        scrollTarget = ids[targetIndex]
+    }
+
+    /// Estimate which tag index is currently near the center of the visible area.
+    private func approximateVisibleIndex(ids: [String]) -> Int {
+        guard contentWidth > 0, !ids.isEmpty else { return 0 }
+        let avgTagWidth = contentWidth / CGFloat(ids.count)
+        let centerOffset = scrollOffset + containerWidth / 2
+        let index = Int(centerOffset / avgTagWidth)
+        return min(max(0, index), ids.count - 1)
+    }
 }
 
-// MARK: - Tag Pill
+// MARK: - FilterTagPill
 
 /// A single pill-shaped tag button showing name and count, with selection state.
 struct FilterTagPill: View {
@@ -150,14 +204,21 @@ struct FilterTagPill: View {
 
 // MARK: - Preference Keys
 
-private struct ContentWidthPreferenceKey: PreferenceKey {
+private struct ContentWidthKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()
     }
 }
 
-private struct ContainerWidthPreferenceKey: PreferenceKey {
+private struct ContainerWidthKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private struct ScrollOffsetKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()

@@ -120,10 +120,10 @@ final class ArtifactUploadService {
         let isoFormatter = ISO8601DateFormatter()
         let createdAtStr = isoFormatter.string(from: createdAt)
 
-        // Create a minimal JSON file containing the URL
-        let jsonContent = "{\"url\": \"\(url)\"}\n"
-        guard let fileData = jsonContent.data(using: .utf8) else {
-            print("[Bundle] Upload failed: could not encode URL")
+        // Create a minimal JSON file containing the URL (properly serialized)
+        let jsonObject: [String: String] = ["url": url]
+        guard let fileData = try? JSONSerialization.data(withJSONObject: jsonObject, options: [.sortedKeys]) else {
+            print("[Bundle] Upload failed: could not encode URL as JSON")
             return nil
         }
 

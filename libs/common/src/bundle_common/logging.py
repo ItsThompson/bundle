@@ -34,7 +34,7 @@ def configure_logging(*, json_output: bool = True, log_level: str = "INFO") -> N
     )
 
 
-def get_logger(name: str | None = None) -> structlog.stdlib.BoundLogger:
+def get_logger(name: str | None = None) -> structlog.BoundLogger:
     """Get a configured structlog logger.
 
     Args:

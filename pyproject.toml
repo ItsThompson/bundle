@@ -21,6 +21,7 @@ indent-style = "space"
 
 [tool.pytest.ini_options]
 testpaths = ["libs", "services"]
+addopts = "--import-mode=importlib"
 
 [tool.pyright]
 pythonVersion = "3.12"
@@ -30,6 +31,7 @@ venv = ".venv"
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28.1",
     "pyright>=1.1.410",
     "pytest>=9.0.3",
     "ruff>=0.15.16",

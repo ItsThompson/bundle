@@ -46,4 +46,4 @@ db-rollback:
 
 # Build production Docker image
 docker-build:
-    docker build -t bundle-api:latest services/api
+    docker build -t bundle-api:latest -f services/api/Dockerfile .

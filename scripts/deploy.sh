@@ -57,9 +57,9 @@ fi
 
 log "Deploying to $DEPLOY_HOST..."
 
-# Pull latest images
+# Pull latest images (or rebuild if using local build context)
 log "Pulling latest images..."
-ssh_cmd "cd $DEPLOY_DIR && docker compose -f $COMPOSE_FILE pull"
+ssh_cmd "cd $DEPLOY_DIR && docker compose -f $COMPOSE_FILE pull || docker compose -f $COMPOSE_FILE build"
 
 # Store current image digests for rollback
 log "Saving current state for rollback..."

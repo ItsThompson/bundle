@@ -1,5 +1,6 @@
 """Health check endpoint."""
 
+import asyncio
 from typing import Annotated
 
 import asyncpg
@@ -10,6 +11,8 @@ from api.dependencies import get_pool
 
 router = APIRouter()
 
+HEALTH_CHECK_TIMEOUT_SECONDS = 3.0
+
 
 @router.get("/health")
 async def health(pool: Annotated[asyncpg.Pool, Depends(get_pool)]) -> JSONResponse:
@@ -19,8 +22,9 @@ async def health(pool: Annotated[asyncpg.Pool, Depends(get_pool)]) -> JSONRespon
     503 with disconnected status when DB is unreachable.
     """
     try:
-        async with pool.acquire() as conn:
-            await conn.fetchval("SELECT 1")
+        async with asyncio.timeout(HEALTH_CHECK_TIMEOUT_SECONDS):
+            async with pool.acquire() as conn:
+                await conn.fetchval("SELECT 1")
         return JSONResponse(
             content={"status": "healthy", "db": "connected"},
             status_code=200,

@@ -96,6 +96,14 @@ def _setup_test_db() -> Generator[None, None, None]:
                     UNIQUE (artifact_id, name)
                 )
             """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS public.artifact_embeddings (
+                    artifact_id UUID PRIMARY KEY REFERENCES artifacts(id) ON DELETE CASCADE,
+                    embedding vector(1536) NOT NULL,
+                    model TEXT NOT NULL DEFAULT 'text-embedding-3-small',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+            """)
         finally:
             await conn.close()
 
@@ -115,6 +123,7 @@ def _clean_tables(_setup_test_db: None) -> Generator[None, None, None]:
     async def cleanup() -> None:
         conn = await asyncpg.connect(TEST_DATABASE_URL)
         try:
+            await conn.execute("DELETE FROM public.artifact_embeddings")
             await conn.execute("DELETE FROM public.artifact_tags")
             await conn.execute("DELETE FROM public.artifacts")
             await conn.execute("DELETE FROM auth.refresh_token_blacklist")

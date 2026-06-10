@@ -1,5 +1,6 @@
 import AppKit
 import CoreGraphics
+import ScreenCaptureKit
 
 /// Result of a screenshot capture operation.
 struct CaptureResult {
@@ -10,7 +11,7 @@ struct CaptureResult {
 }
 
 /// Handles screen region selection and PNG capture.
-/// Uses CGWindowListCreateImage for the actual screenshot.
+/// Uses ScreenCaptureKit (SCScreenshotManager) for the actual screenshot.
 @MainActor
 final class ScreenshotCapture {
     private var overlayWindow: NSWindow?
@@ -70,19 +71,13 @@ final class ScreenshotCapture {
             height: rect.height
         )
 
-        // Capture the screen region
-        guard let cgImage = CGWindowListCreateImage(
-            cgRect,
-            .optionOnScreenBelowWindow,
-            kCGNullWindowID,
-            [.bestResolution]
-        ) else {
-            completion(nil)
-            return
-        }
-
-        // Save to disk asynchronously
+        // Capture the screen region via ScreenCaptureKit
         Task {
+            let cgImage = await Self.captureScreen(rect: cgRect, screen: screen)
+            guard let cgImage else {
+                completion(nil)
+                return
+            }
             let result = saveCapture(image: cgImage)
             completion(result)
         }
@@ -93,6 +88,45 @@ final class ScreenshotCapture {
         overlayWindow?.orderOut(nil)
         overlayWindow = nil
         selectionView = nil
+    }
+
+    /// Capture a screen region using ScreenCaptureKit's SCScreenshotManager.
+    private static func captureScreen(rect: CGRect, screen: NSScreen) async -> CGImage? {
+        do {
+            let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+
+            // Find the SCDisplay matching the target NSScreen
+            guard let display = content.displays.first(where: { display in
+                display.frame == screen.frame
+            }) ?? content.displays.first else {
+                return nil
+            }
+
+            // Exclude our own app's windows from the capture
+            let excludedApps = content.applications.filter { app in
+                app.bundleIdentifier == Bundle.main.bundleIdentifier
+            }
+
+            let filter = SCContentFilter(
+                display: display,
+                excludingApplications: excludedApps,
+                exceptingWindows: []
+            )
+
+            let config = SCStreamConfiguration()
+            config.sourceRect = rect
+            config.width = Int(rect.width) * Int(screen.backingScaleFactor)
+            config.height = Int(rect.height) * Int(screen.backingScaleFactor)
+            config.showsCursor = false
+
+            return try await SCScreenshotManager.captureImage(
+                contentFilter: filter,
+                configuration: config
+            )
+        } catch {
+            print("[Bundle] ScreenCaptureKit capture failed: \(error)")
+            return nil
+        }
     }
 
     // MARK: - File Save

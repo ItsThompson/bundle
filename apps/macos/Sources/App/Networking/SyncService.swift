@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 /// Manages bidirectional sync between the macOS app and backend.

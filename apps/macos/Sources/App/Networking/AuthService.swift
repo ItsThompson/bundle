@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 /// Handles authentication operations: register, login, refresh, logout, and session validation.

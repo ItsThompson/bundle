@@ -1,5 +1,6 @@
 import Carbon.HIToolbox
 import Cocoa
+import Combine
 
 /// Represents a key combination (modifier flags + key code).
 struct KeyCombo: Equatable, Codable {

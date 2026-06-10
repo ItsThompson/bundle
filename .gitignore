@@ -31,3 +31,8 @@ Thumbs.db
 
 # Docker volumes
 pgdata/
+data/
+
+# Xcode user data
+xcuserdata/
+*.xcuserstate

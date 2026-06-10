@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 /// Shared navigation state between RetrievalPanel and RetrievalContentView.

@@ -206,7 +206,8 @@ class TestSearchEndpoint:
 
         assert response.status_code == 200
         data = response.json()
-        assert data["total"] <= 40
+        # We uploaded 50 notes matching "python" but should get at most 40
+        assert data["total"] == 40
 
     def test_search_response_format(
         self, client: TestClient, auth_headers: dict[str, str], tmp_path, monkeypatch

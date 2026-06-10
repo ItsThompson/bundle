@@ -1,4 +1,3 @@
-import Combine
 import SwiftUI
 
 /// Container view that manages artifact loading and displays the grid.
@@ -40,7 +39,9 @@ struct ArtifactGridContainer: View {
             }
 
             // Content area
-            if isSearching {
+            if syncService.initialSyncProgress != nil {
+                initialSyncProgressView
+            } else if isSearching {
                 searchLoadingView
             } else if !searchText.isEmpty && searchResults.isEmpty && !isLoading {
                 noMatchesView
@@ -69,6 +70,37 @@ struct ArtifactGridContainer: View {
                 loadInitialArtifacts()
             }
         }
+    }
+
+    // MARK: - Initial Sync Progress
+
+    private var initialSyncProgressView: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "arrow.triangle.2.circlepath")
+                .font(.system(size: 48))
+                .foregroundColor(.secondary)
+                .rotationEffect(.degrees(syncService.isSyncing ? 360 : 0))
+                .animation(
+                    .linear(duration: 2).repeatForever(autoreverses: false),
+                    value: syncService.isSyncing
+                )
+
+            Text("Syncing artifacts...")
+                .font(.title2)
+                .fontWeight(.medium)
+
+            if let progress = syncService.initialSyncProgress {
+                ProgressView(value: progress)
+                    .progressViewStyle(.linear)
+                    .frame(maxWidth: 200)
+
+                Text("\(Int(progress * 100))%")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(40)
     }
 
     // MARK: - Empty State
@@ -265,6 +297,9 @@ struct ArtifactGridContainer: View {
                 )
             }
         } catch {
+            // Only clear results if the query is still current
+            let currentTrimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard currentTrimmed == query else { return }
             print("[Bundle] Search failed: \(error.localizedDescription)")
             searchResults = []
         }

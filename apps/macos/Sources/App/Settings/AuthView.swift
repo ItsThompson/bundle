@@ -33,12 +33,6 @@ struct AuthView: View {
             Text("Signed in")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
-
-            Button("Log Out") {
-                Task { await authService.logout() }
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
         }
         .padding(24)
         .frame(maxWidth: .infinity)

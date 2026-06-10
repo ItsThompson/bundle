@@ -2,13 +2,21 @@ import AppKit
 import SwiftUI
 
 /// Settings panel: non-activating NSPanel that floats above other windows.
-/// Contains auth UI and (future) hotkey configuration.
+/// Contains auth UI, hotkey configuration, and account management.
 final class SettingsPanel {
     private var panel: NSPanel?
     private let authService: AuthService
+    private let hotkeyManager: HotkeyManager
+    private let artifactCountProvider: () -> Int
 
-    init(authService: AuthService) {
+    init(
+        authService: AuthService,
+        hotkeyManager: HotkeyManager,
+        artifactCountProvider: @escaping () -> Int = { 0 }
+    ) {
         self.authService = authService
+        self.hotkeyManager = hotkeyManager
+        self.artifactCountProvider = artifactCountProvider
     }
 
     func toggle() {
@@ -25,12 +33,16 @@ final class SettingsPanel {
             return
         }
 
-        let contentView = SettingsContentView(authService: authService)
+        let contentView = SettingsContentView(
+            authService: authService,
+            hotkeyManager: hotkeyManager,
+            artifactCount: artifactCountProvider()
+        )
         let hostingView = NSHostingView(rootView: contentView)
-        hostingView.frame = NSRect(x: 0, y: 0, width: 360, height: 400)
+        hostingView.frame = NSRect(x: 0, y: 0, width: 380, height: 560)
 
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 360, height: 400),
+            contentRect: NSRect(x: 0, y: 0, width: 380, height: 560),
             styleMask: [.titled, .closable, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -53,17 +65,37 @@ final class SettingsPanel {
 
 // MARK: - Settings Content View
 
-/// Root view for the settings panel: shows auth section.
+/// Root view for the settings panel: shows auth, hotkey, and account sections.
 private struct SettingsContentView: View {
     @ObservedObject var authService: AuthService
+    @ObservedObject var hotkeyManager: HotkeyManager
+    let artifactCount: Int
 
     var body: some View {
         ScrollView {
             VStack(spacing: 20) {
-                AuthView(authService: authService)
+                if authService.isAuthenticated {
+                    HotkeyConfigView(hotkeyManager: hotkeyManager)
+                    Divider()
+                    AccountView(authService: authService, artifactCount: artifactCount)
+                    Divider()
+                    logoutSection
+                } else {
+                    AuthView(authService: authService)
+                }
             }
             .padding()
         }
-        .frame(minWidth: 320, minHeight: 300)
+        .frame(minWidth: 340, minHeight: 400)
+    }
+
+    private var logoutSection: some View {
+        Button("Log Out") {
+            Task { await authService.logout() }
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.regular)
+        .frame(maxWidth: .infinity, alignment: .center)
+        .padding(.top, 8)
     }
 }

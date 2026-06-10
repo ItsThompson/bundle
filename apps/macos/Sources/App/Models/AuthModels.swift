@@ -20,6 +20,20 @@ struct RefreshRequest: Encodable {
     }
 }
 
+struct UpdateEmailRequest: Encodable {
+    let email: String
+}
+
+struct ChangePasswordRequest: Encodable {
+    let currentPassword: String
+    let newPassword: String
+
+    enum CodingKeys: String, CodingKey {
+        case currentPassword = "current_password"
+        case newPassword = "new_password"
+    }
+}
+
 // MARK: - Response Models
 
 struct UserResponse: Decodable, Equatable {

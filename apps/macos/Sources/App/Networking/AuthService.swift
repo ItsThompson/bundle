@@ -130,6 +130,59 @@ final class AuthService: ObservableObject {
         errorMessage = nil
     }
 
+    // MARK: - Update Email
+
+    /// Update the current user's email address. Returns nil on success, error message on failure.
+    func updateEmail(_ newEmail: String) async -> String? {
+        if let validationError = validateEmail(newEmail) {
+            return validationError
+        }
+
+        do {
+            let user: UserResponse = try await apiClient.request(
+                method: .put,
+                path: "/api/auth/me",
+                body: UpdateEmailRequest(email: newEmail)
+            )
+            currentUser = user
+            return nil
+        } catch let error as APIError {
+            return error.localizedDescription
+        } catch {
+            return "An unexpected error occurred"
+        }
+    }
+
+    // MARK: - Change Password
+
+    /// Change password. On success: saves new tokens, other sessions invalidated.
+    /// Returns nil on success, error message on failure.
+    func changePassword(current: String, new newPassword: String, confirmation: String) async -> String? {
+        if newPassword != confirmation {
+            return "Passwords do not match"
+        }
+
+        if let validationError = validatePasswordLocally(newPassword) {
+            return validationError
+        }
+
+        do {
+            let response: AuthResponse = try await apiClient.request(
+                method: .post,
+                path: "/api/auth/me/password",
+                body: ChangePasswordRequest(currentPassword: current, newPassword: newPassword)
+            )
+            // Save new tokens (old ones are now revoked server-side)
+            try tokenStore.saveTokens(access: response.accessToken, refresh: response.refreshToken)
+            currentUser = response.user
+            return nil
+        } catch let error as APIError {
+            return error.localizedDescription
+        } catch {
+            return "An unexpected error occurred"
+        }
+    }
+
     // MARK: - Password Validation
 
     /// Client-side email format validation.

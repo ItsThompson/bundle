@@ -4,7 +4,6 @@ import json
 from io import StringIO
 
 import structlog
-
 from bundle_common import configure_logging, get_logger
 
 

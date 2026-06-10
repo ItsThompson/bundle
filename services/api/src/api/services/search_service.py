@@ -43,6 +43,10 @@ async def hybrid_search(
     query_embedding = await embedding_provider.embed(query_text)
 
     # Execute hybrid search query
+    # Matches artifacts where:
+    # 1. content_text matches via full-text search (tsvector)
+    # 2. tag names match the query text
+    # 3. vector similarity exceeds 0.3 threshold
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
@@ -56,6 +60,11 @@ async def hybrid_search(
               AND (
                 a.search_vector @@ plainto_tsquery('english', $2)
                 OR 1 - (e.embedding <=> $3::vector) > 0.3
+                OR EXISTS (
+                    SELECT 1 FROM artifact_tags t
+                    WHERE t.artifact_id = a.id
+                      AND to_tsvector('english', t.name) @@ plainto_tsquery('english', $2)
+                )
               )
             ORDER BY (
                 COALESCE(ts_rank(a.search_vector, plainto_tsquery('english', $2)), 0) * $4 +

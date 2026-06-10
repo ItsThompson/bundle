@@ -349,3 +349,51 @@ class TestSearchEndpoint:
         data = response.json()
         assert data["total"] == 0
         assert data["items"] == []
+
+    def test_search_matches_tag_names(
+        self, client: TestClient, auth_headers: dict[str, str], tmp_path, monkeypatch
+    ) -> None:
+        """Search finds artifacts by matching tag names."""
+        monkeypatch.setattr(
+            client.app.state.settings, "artifacts_path", str(tmp_path)
+        )
+
+        # Upload a screenshot (no content_text, so no FTS match)
+        resp = client.post(
+            "/api/v1/artifacts",
+            data={"type": "screenshot", "created_at": "2026-06-10T12:00:00Z"},
+            files={"file": ("shot.png", b"\x89PNG" + b"\x00" * 50, "image/png")},
+            headers=auth_headers,
+        )
+        artifact_id = resp.json()["id"]
+
+        # Add a tag that will match the search query
+        async def add_tag() -> None:
+            conn = await asyncpg.connect(TEST_DATABASE_URL)
+            try:
+                await conn.execute(
+                    "INSERT INTO artifact_tags (artifact_id, name) VALUES ($1, $2)",
+                    uuid.UUID(artifact_id),
+                    "typography",
+                )
+            finally:
+                await conn.close()
+
+        asyncio.run(add_tag())
+
+        # Mock embedding provider: return embedding that won't match (no vector similarity)
+        mock_provider = AsyncMock()
+        mock_provider.embed = AsyncMock(return_value=_fake_embedding(99.0))
+        mock_provider.dimensions = 1536
+        client.app.state.embedding_provider = mock_provider
+
+        # Search for the tag name
+        response = client.get(
+            "/api/v1/artifacts/search?q=typography", headers=auth_headers
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] >= 1
+        found_ids = [item["id"] for item in data["items"]]
+        assert artifact_id in found_ids

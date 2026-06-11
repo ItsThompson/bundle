@@ -63,18 +63,20 @@ final class RetrievalPanel {
             y: screenFrame.midY - height / 2
         )
 
-        let panel = NSPanel(
+        let panel = KeyablePanel(
             contentRect: NSRect(origin: origin, size: NSSize(width: width, height: height)),
-            styleMask: [.nonactivatingPanel, .borderless],
+            styleMask: [.nonactivatingPanel, .titled, .closable, .resizable],
             backing: .buffered,
             defer: false
         )
+        panel.title = "Bundle"
         panel.level = .floating
         panel.isFloatingPanel = true
-        panel.becomesKeyOnlyIfNeeded = true
+        panel.becomesKeyOnlyIfNeeded = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.isMovableByWindowBackground = true
         panel.isOpaque = false
-        panel.backgroundColor = .clear
+        panel.backgroundColor = NSColor.windowBackgroundColor
         panel.hasShadow = true
         panel.hidesOnDeactivate = false
 

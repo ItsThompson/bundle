@@ -57,6 +57,6 @@ macos-build:
 #   Name: "Bundle Dev", Type: Self Signed Root, Cert Type: Code Signing
 macos-run:
     cd apps/macos && swift build
-    codesign -f -s "Bundle Dev" --identifier com.thompsnt.bundle apps/macos/.build/debug/Bundle
+    codesign -f -s "Bundle Dev" --entitlements apps/macos/Bundle.entitlements --identifier com.thompsnt.bundle apps/macos/.build/debug/Bundle
     @echo "Launching Bundle..."
     apps/macos/.build/debug/Bundle &

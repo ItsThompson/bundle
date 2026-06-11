@@ -34,7 +34,7 @@ def _setup_test_db() -> Generator[None, None, None]:
     async def setup() -> None:
         # Create the test database if it doesn't exist
         sys_conn = await asyncpg.connect(
-            "postgresql://bundle:bundle_dev@localhost:5433/bundle"
+            "postgresql://bundle:bundle_dev@localhost:5433/postgres"
         )
         try:
             exists = await sys_conn.fetchval(

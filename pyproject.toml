@@ -28,6 +28,8 @@ pythonVersion = "3.12"
 typeCheckingMode = "basic"
 venvPath = "."
 venv = ".venv"
+include = ["services", "libs"]
+exclude = ["**/tests/**"]
 
 [dependency-groups]
 dev = [

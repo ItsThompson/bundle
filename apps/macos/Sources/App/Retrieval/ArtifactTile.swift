@@ -99,10 +99,13 @@ struct ArtifactTile: View {
     private var screenshotTile: some View {
         Group {
             if let imagePath = thumbnailPath, let nsImage = NSImage(contentsOfFile: imagePath) {
-                Image(nsImage: nsImage)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
+                Color.clear
                     .frame(maxWidth: .infinity, maxHeight: tileHeight)
+                    .overlay {
+                        Image(nsImage: nsImage)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    }
                     .clipped()
             } else {
                 Rectangle()

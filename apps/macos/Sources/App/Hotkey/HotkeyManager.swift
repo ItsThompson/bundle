@@ -184,6 +184,9 @@ final class HotkeyManager: ObservableObject {
     func register() {
         unregister()
 
+        let trusted = AXIsProcessTrusted()
+        print("[Bundle] Hotkey register: AXIsProcessTrusted=\(trusted), app path=\(Bundle.main.executablePath ?? "unknown")")
+
         let eventMask: CGEventMask = (1 << CGEventType.keyDown.rawValue)
 
         // The callback needs to reference self, which we pass via userInfo
@@ -197,9 +200,30 @@ final class HotkeyManager: ObservableObject {
             callback: hotkeyCallback,
             userInfo: unmanagedSelf.toOpaque()
         ) else {
-            print("[Bundle] Failed to create CGEvent tap. Accessibility permissions required.")
+            print("[Bundle] Failed to create CGEvent tap. AXIsProcessTrusted=\(trusted)")
+            // Retry with listen-only tap as fallback
+            guard let listenTap = CGEvent.tapCreate(
+                tap: .cgSessionEventTap,
+                place: .headInsertEventTap,
+                options: .listenOnly,
+                eventsOfInterest: eventMask,
+                callback: hotkeyCallback,
+                userInfo: unmanagedSelf.toOpaque()
+            ) else {
+                print("[Bundle] Failed to create even a listen-only tap. Permissions completely missing.")
+                return
+            }
+            print("[Bundle] Created listen-only tap (cannot consume events but can detect hotkey)")
+            let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, listenTap, 0)
+            CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
+            CGEvent.tapEnable(tap: listenTap, enable: true)
+            self.eventTap = listenTap
+            self._callbackEventTap = listenTap
+            self.runLoopSource = source
             return
         }
+
+        print("[Bundle] CGEvent tap created successfully")
 
         let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
         CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)

@@ -16,9 +16,11 @@ struct CaptureResult {
 final class ScreenshotCapture {
     private var overlayWindow: NSWindow?
     private var selectionView: RegionSelectionView?
+    private var escapeMonitor: Any?
+    private var completion: ((CaptureResult?) -> Void)?
 
     /// Begin region selection mode. Calls completion with the capture result on success,
-    /// or nil if the user cancels (Escape).
+    /// or nil if the user cancels (Escape or right-click).
     func captureRegion(completion: @escaping (CaptureResult?) -> Void) {
         guard let screen = NSScreen.main else {
             completion(nil)
@@ -55,6 +57,21 @@ final class ScreenshotCapture {
 
         self.overlayWindow = window
         self.selectionView = selectionView
+        self.completion = completion
+
+        // Global escape monitor: safety net if overlay loses key status
+        escapeMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            if event.keyCode == 53 { // Escape
+                self?.cancelCapture()
+            }
+        }
+    }
+
+    /// Cancel the capture and dismiss overlay. Safe to call multiple times.
+    private func cancelCapture() {
+        let handler = completion
+        dismissOverlay()
+        handler?(nil)
     }
 
     private func finishCapture(rect: NSRect, screen: NSScreen, completion: @escaping (CaptureResult?) -> Void) {
@@ -82,6 +99,11 @@ final class ScreenshotCapture {
     }
 
     private func dismissOverlay() {
+        if let monitor = escapeMonitor {
+            NSEvent.removeMonitor(monitor)
+            escapeMonitor = nil
+        }
+        completion = nil
         overlayWindow?.orderOut(nil)
         overlayWindow = nil
         selectionView = nil
@@ -297,6 +319,10 @@ private class RegionSelectionView: NSView {
         if event.keyCode == 53 { // Escape
             onCancel?()
         }
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        onCancel?()
     }
 
     override func draw(_ dirtyRect: NSRect) {

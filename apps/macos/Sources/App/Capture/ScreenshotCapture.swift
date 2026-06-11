@@ -55,6 +55,9 @@ final class ScreenshotCapture {
         window.makeKeyAndOrderFront(nil)
         window.makeFirstResponder(selectionView)
 
+        // Force cursor change immediately (resetCursorRects only fires on mouse move)
+        Self.blueCrosshairCursor.set()
+
         self.overlayWindow = window
         self.selectionView = selectionView
         self.completion = completion
@@ -147,6 +150,34 @@ final class ScreenshotCapture {
             return nil
         }
     }
+
+    /// Crosshair cursor with a blue circle indicator to make screenshot mode obvious.
+    static let blueCrosshairCursor: NSCursor = {
+        let size: CGFloat = 32
+        let image = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
+            // Draw blue circle ring
+            let inset: CGFloat = 2
+            let circlePath = NSBezierPath(ovalIn: rect.insetBy(dx: inset, dy: inset))
+            NSColor.systemBlue.withAlphaComponent(0.8).setStroke()
+            circlePath.lineWidth = 2.5
+            circlePath.stroke()
+
+            // Draw crosshair lines in center
+            let center = NSPoint(x: size / 2, y: size / 2)
+            let lineLength: CGFloat = 8
+            let crossPath = NSBezierPath()
+            crossPath.move(to: NSPoint(x: center.x - lineLength, y: center.y))
+            crossPath.line(to: NSPoint(x: center.x + lineLength, y: center.y))
+            crossPath.move(to: NSPoint(x: center.x, y: center.y - lineLength))
+            crossPath.line(to: NSPoint(x: center.x, y: center.y + lineLength))
+            NSColor.white.setStroke()
+            crossPath.lineWidth = 1.5
+            crossPath.stroke()
+
+            return true
+        }
+        return NSCursor(image: image, hotSpot: NSPoint(x: size / 2, y: size / 2))
+    }()
 
     // MARK: - File Save
 
@@ -252,36 +283,8 @@ private class RegionSelectionView: NSView {
     override var acceptsFirstResponder: Bool { true }
 
     override func resetCursorRects() {
-        addCursorRect(bounds, cursor: Self.blueCrosshairCursor)
+        addCursorRect(bounds, cursor: ScreenshotCapture.blueCrosshairCursor)
     }
-
-    /// Crosshair cursor with a blue circle indicator to make screenshot mode obvious.
-    private static let blueCrosshairCursor: NSCursor = {
-        let size: CGFloat = 32
-        let image = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
-            // Draw blue circle ring
-            let inset: CGFloat = 2
-            let circlePath = NSBezierPath(ovalIn: rect.insetBy(dx: inset, dy: inset))
-            NSColor.systemBlue.withAlphaComponent(0.8).setStroke()
-            circlePath.lineWidth = 2.5
-            circlePath.stroke()
-
-            // Draw crosshair lines in center
-            let center = NSPoint(x: size / 2, y: size / 2)
-            let lineLength: CGFloat = 8
-            let crossPath = NSBezierPath()
-            crossPath.move(to: NSPoint(x: center.x - lineLength, y: center.y))
-            crossPath.line(to: NSPoint(x: center.x + lineLength, y: center.y))
-            crossPath.move(to: NSPoint(x: center.x, y: center.y - lineLength))
-            crossPath.line(to: NSPoint(x: center.x, y: center.y + lineLength))
-            NSColor.white.setStroke()
-            crossPath.lineWidth = 1.5
-            crossPath.stroke()
-
-            return true
-        }
-        return NSCursor(image: image, hotSpot: NSPoint(x: size / 2, y: size / 2))
-    }()
 
     override func mouseDown(with event: NSEvent) {
         startPoint = convert(event.locationInWindow, from: nil)

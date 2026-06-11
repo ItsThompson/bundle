@@ -23,7 +23,9 @@ reverse chronological and semantic views.
 
 Bundle is a macOS-native menubar app for capturing fleeting inspiration: screenshots, quick notes, and links. Artifacts are auto-tagged via LLM (Anthropic Claude for vision/text, OpenAI for embeddings) and retrievable through a reverse-chronological grid or semantic search powered by pgvector hybrid ranking (BM25 + cosine similarity).
 
-Think Day One meets Pinterest, living in your menubar.
+
+https://github.com/user-attachments/assets/8cf2de95-b0c2-4590-9a47-1f06a67133a6
+
 
 ## Technology Stack
 

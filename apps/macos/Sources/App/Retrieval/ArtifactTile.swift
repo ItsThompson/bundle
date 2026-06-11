@@ -102,7 +102,8 @@ struct ArtifactTile: View {
                 Image(nsImage: nsImage)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
-                    .frame(height: tileHeight)
+                    .frame(maxWidth: .infinity, maxHeight: tileHeight)
+                    .clipped()
             } else {
                 Rectangle()
                     .fill(Color(nsColor: .controlBackgroundColor))

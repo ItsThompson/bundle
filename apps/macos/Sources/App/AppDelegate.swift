@@ -120,7 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func handleNoteCaptureResult(_ result: NoteCaptureResult) {
         // 1. Insert into local SQLite with status "pending"
         do {
-            let relativePath = result.filePath.lastPathComponent
+            let relativePath = Self.relativePath(for: result.filePath)
             try localDatabase.insertArtifact(
                 id: result.artifactId,
                 type: "note",
@@ -221,7 +221,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func handleCaptureResult(_ result: CaptureResult) {
         // 1. Insert into local SQLite with status "pending"
         do {
-            let relativePath = result.fullPath.lastPathComponent
+            let relativePath = Self.relativePath(for: result.fullPath)
             try localDatabase.insertArtifact(
                 id: result.artifactId,
                 type: "screenshot",
@@ -293,5 +293,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func openNoteEditorForArtifact(_ artifactId: String) {
         // TODO: Open note editor pre-linked to artifact (future ticket)
         print("[Bundle] Add Note for artifact: \(artifactId)")
+    }
+
+    // MARK: - Path Helpers
+
+    /// Compute relative path from the artifacts base directory.
+    /// e.g., "/Users/.../Bundle/artifacts/2026/06/11/abc.png" → "2026/06/11/abc.png"
+    private static func relativePath(for fileURL: URL) -> String {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let artifactsDir = appSupport.appendingPathComponent("Bundle/artifacts").path + "/"
+        let fullPath = fileURL.path
+        if fullPath.hasPrefix(artifactsDir) {
+            return String(fullPath.dropFirst(artifactsDir.count))
+        }
+        return fileURL.lastPathComponent
     }
 }

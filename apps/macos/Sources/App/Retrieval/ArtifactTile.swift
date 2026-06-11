@@ -215,6 +215,32 @@ struct ArtifactTile: View {
             return fullPath
         }
 
+        // Legacy fallback: contentPath might be filename-only, search in date dirs
+        if !contentPath.contains("/") {
+            let legacyThumbName = "\(baseName)_thumb.\(ext)"
+            if let found = Self.findFileInArtifacts(named: legacyThumbName, baseDir: artifactsDir) {
+                return found
+            }
+            if let found = Self.findFileInArtifacts(named: contentPath, baseDir: artifactsDir) {
+                return found
+            }
+        }
+
+        return nil
+    }
+
+    /// Search recursively for a file by name in the artifacts directory.
+    private static func findFileInArtifacts(named filename: String, baseDir: URL) -> String? {
+        let enumerator = FileManager.default.enumerator(
+            at: baseDir,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )
+        while let fileURL = enumerator?.nextObject() as? URL {
+            if fileURL.lastPathComponent == filename {
+                return fileURL.path
+            }
+        }
         return nil
     }
 

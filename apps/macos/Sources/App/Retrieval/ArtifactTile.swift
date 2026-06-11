@@ -99,7 +99,7 @@ struct ArtifactTile: View {
     private var screenshotTile: some View {
         Group {
             if let imagePath = thumbnailPath, let nsImage = NSImage(contentsOfFile: imagePath) {
-                Color.clear
+                Color(nsColor: .controlBackgroundColor)
                     .frame(maxWidth: .infinity, maxHeight: tileHeight)
                     .overlay {
                         Image(nsImage: nsImage)

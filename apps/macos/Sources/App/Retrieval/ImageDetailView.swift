@@ -56,20 +56,19 @@ struct ZoomableImageView: NSViewRepresentable {
         scrollView.borderType = .noBorder
         scrollView.backgroundColor = .clear
         scrollView.allowsMagnification = true
-        scrollView.minMagnification = minMagnification
+        scrollView.minMagnification = 0.1
         scrollView.maxMagnification = maxMagnification
-        scrollView.magnification = magnification
 
         let imageView = NSImageView()
         imageView.image = image
-        imageView.imageScaling = .scaleProportionallyUpOrDown
+        imageView.imageScaling = .scaleNone
         imageView.setFrameSize(image.size)
 
         scrollView.documentView = imageView
 
-        // Center the image initially
+        // Fit image to scroll view on first layout
         DispatchQueue.main.async {
-            self.centerImage(in: scrollView)
+            self.fitImageToView(in: scrollView)
         }
 
         return scrollView
@@ -86,14 +85,17 @@ struct ZoomableImageView: NSViewRepresentable {
         // The NSScrollView handles magnification natively.
     }
 
-    private func centerImage(in scrollView: NSScrollView) {
-        guard let documentView = scrollView.documentView else { return }
+    private func fitImageToView(in scrollView: NSScrollView) {
         let viewSize = scrollView.contentSize
-        let documentSize = documentView.frame.size
+        let imageSize = image.size
 
-        let xOffset = max(0, (documentSize.width - viewSize.width) / 2)
-        let yOffset = max(0, (documentSize.height - viewSize.height) / 2)
+        guard imageSize.width > 0, imageSize.height > 0 else { return }
 
-        documentView.scroll(NSPoint(x: xOffset, y: yOffset))
+        let scaleX = viewSize.width / imageSize.width
+        let scaleY = viewSize.height / imageSize.height
+        let fitScale = min(scaleX, scaleY, 1.0) // Don't upscale small images
+
+        scrollView.minMagnification = fitScale
+        scrollView.magnification = fitScale
     }
 }

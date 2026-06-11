@@ -6,3 +6,10 @@ import AppKit
 final class KeyablePanel: NSPanel {
     override var canBecomeKey: Bool { true }
 }
+
+/// NSWindow subclass that can become key with `.borderless` style.
+/// Used for full-screen overlays (screenshot region selection) that need
+/// keyboard events (Escape to cancel).
+final class KeyableWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+}

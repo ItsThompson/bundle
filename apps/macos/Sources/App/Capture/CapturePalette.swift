@@ -39,6 +39,7 @@ final class CapturePalette {
     private var onSelect: CaptureOptionHandler?
     private var localMonitor: Any?
     private var globalMonitor: Any?
+    private let selectionState = PaletteSelectionState()
 
     var isVisible: Bool {
         panel?.isVisible ?? false
@@ -62,6 +63,7 @@ final class CapturePalette {
         panel?.orderOut(nil)
         panel = nil
         onSelect = nil
+        selectionState.selectedIndex = 0
     }
 
     // MARK: - Panel Creation
@@ -92,7 +94,7 @@ final class CapturePalette {
         panel.hasShadow = true
 
         let contentView = CapturePaletteView(
-            selectedIndex: 0,
+            state: selectionState,
             onSelect: { [weak self] option in
                 self?.handleSelection(option)
             }
@@ -142,6 +144,19 @@ final class CapturePalette {
             return true
         }
 
+        // j/k and arrow keys for navigation
+        if let chars = event.charactersIgnoringModifiers {
+            let maxIndex = CaptureOption.allCases.count - 1
+            if chars == "j" || event.keyCode == 125 { // j or down arrow
+                selectionState.selectedIndex = min(maxIndex, selectionState.selectedIndex + 1)
+                return true
+            }
+            if chars == "k" || event.keyCode == 126 { // k or up arrow
+                selectionState.selectedIndex = max(0, selectionState.selectedIndex - 1)
+                return true
+            }
+        }
+
         // Number keys select directly
         if let chars = event.charactersIgnoringModifiers,
            let number = Int(chars),
@@ -150,10 +165,11 @@ final class CapturePalette {
             return true
         }
 
-        // Enter confirms current selection (handled by SwiftUI view)
+        // Enter confirms current selection
         if event.keyCode == 36 { // kVK_Return
-            // The SwiftUI view handles enter via its own state
-            return false
+            let option = CaptureOption.allCases[selectionState.selectedIndex]
+            handleSelection(option)
+            return true
         }
 
         return false
@@ -166,10 +182,17 @@ final class CapturePalette {
     }
 }
 
+// MARK: - Shared Selection State
+
+@MainActor
+private final class PaletteSelectionState: ObservableObject {
+    @Published var selectedIndex: Int = 0
+}
+
 // MARK: - Palette SwiftUI View
 
 private struct CapturePaletteView: View {
-    @State var selectedIndex: Int
+    @ObservedObject var state: PaletteSelectionState
     let onSelect: (CaptureOption) -> Void
 
     var body: some View {
@@ -177,7 +200,7 @@ private struct CapturePaletteView: View {
             ForEach(Array(CaptureOption.allCases.enumerated()), id: \.element.rawValue) { index, option in
                 CaptureOptionRow(
                     option: option,
-                    isSelected: index == selectedIndex,
+                    isSelected: index == state.selectedIndex,
                     onSelect: { onSelect(option) }
                 )
             }
@@ -191,27 +214,6 @@ private struct CapturePaletteView: View {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
         )
-        .onKeyPress(.upArrow) {
-            selectedIndex = max(0, selectedIndex - 1)
-            return .handled
-        }
-        .onKeyPress(.downArrow) {
-            selectedIndex = min(CaptureOption.allCases.count - 1, selectedIndex + 1)
-            return .handled
-        }
-        .onKeyPress(keys: [KeyEquivalent("k")]) { _ in
-            selectedIndex = max(0, selectedIndex - 1)
-            return .handled
-        }
-        .onKeyPress(keys: [KeyEquivalent("j")]) { _ in
-            selectedIndex = min(CaptureOption.allCases.count - 1, selectedIndex + 1)
-            return .handled
-        }
-        .onKeyPress(.return) {
-            let option = CaptureOption.allCases[selectedIndex]
-            onSelect(option)
-            return .handled
-        }
     }
 }
 

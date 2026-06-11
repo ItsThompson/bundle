@@ -28,7 +28,7 @@ final class ScreenshotCapture {
         let screenFrame = screen.frame
 
         // Create a transparent overlay window covering the entire screen
-        let window = NSWindow(
+        let window = KeyableWindow(
             contentRect: screenFrame,
             styleMask: .borderless,
             backing: .buffered,

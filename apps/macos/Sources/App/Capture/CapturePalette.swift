@@ -199,6 +199,14 @@ private struct CapturePaletteView: View {
             selectedIndex = min(CaptureOption.allCases.count - 1, selectedIndex + 1)
             return .handled
         }
+        .onKeyPress(keys: [KeyEquivalent("k")]) { _ in
+            selectedIndex = max(0, selectedIndex - 1)
+            return .handled
+        }
+        .onKeyPress(keys: [KeyEquivalent("j")]) { _ in
+            selectedIndex = min(CaptureOption.allCases.count - 1, selectedIndex + 1)
+            return .handled
+        }
         .onKeyPress(.return) {
             let option = CaptureOption.allCases[selectedIndex]
             onSelect(option)

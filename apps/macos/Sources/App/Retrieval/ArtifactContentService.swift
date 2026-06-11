@@ -40,6 +40,28 @@ final class ArtifactContentService {
             return fullPath
         }
 
+        // Legacy fallback: contentPath might be filename-only, search in date dirs
+        if !contentPath.contains("/") {
+            if let found = findFileInArtifacts(named: contentPath) {
+                return found
+            }
+        }
+
+        return nil
+    }
+
+    /// Search recursively for a file by name in the artifacts directory.
+    private func findFileInArtifacts(named filename: String) -> URL? {
+        let enumerator = FileManager.default.enumerator(
+            at: artifactsDirectory,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )
+        while let fileURL = enumerator?.nextObject() as? URL {
+            if fileURL.lastPathComponent == filename {
+                return fileURL
+            }
+        }
         return nil
     }
 

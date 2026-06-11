@@ -321,10 +321,6 @@ private class RegionSelectionView: NSView {
         }
     }
 
-    override func rightMouseDown(with event: NSEvent) {
-        onCancel?()
-    }
-
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
 

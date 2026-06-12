@@ -52,10 +52,12 @@ docker-build:
 macos-build:
     cd apps/macos && swift build
 
-# Build + sign macOS app (requires a valid codesigning identity in Keychain)
-# Uses BUNDLE_SIGN_IDENTITY env var, or falls back to first available identity.
+# Build + sign macOS app with stable "Bundle Dev" self-signed cert.
+# TCC permissions (Screen Recording, Accessibility) persist across rebuilds
+# because macOS ties them to the signing identity, not the binary hash.
+# Override with BUNDLE_SIGN_IDENTITY env var if needed.
 macos-run:
     cd apps/macos && swift build
-    codesign -f -s "${BUNDLE_SIGN_IDENTITY:-Apple Development: hi.thompson@hotmail.com (3K9A67H5C3)}" --entitlements apps/macos/Bundle.entitlements --identifier com.thompsnt.bundle apps/macos/.build/debug/Bundle
+    codesign -f -s "${BUNDLE_SIGN_IDENTITY:-Bundle Dev}" --entitlements apps/macos/Bundle.entitlements --identifier com.thompsnt.bundle apps/macos/.build/debug/Bundle
     @echo "Launching Bundle..."
     apps/macos/.build/debug/Bundle

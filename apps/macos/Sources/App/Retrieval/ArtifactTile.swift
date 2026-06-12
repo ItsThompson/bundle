@@ -199,35 +199,46 @@ struct ArtifactTile: View {
 
     /// Path to the thumbnail for screenshot artifacts.
     private var thumbnailPath: String? {
-        guard let contentPath = artifact.contentPath else { return nil }
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let artifactsDir = appSupport.appendingPathComponent("Bundle/artifacts")
 
-        // Try thumbnail first (name_thumb.png), fall back to original
-        let baseName = (contentPath as NSString).deletingPathExtension
-        let ext = (contentPath as NSString).pathExtension
-        let thumbName = "\(baseName)_thumb.\(ext)"
-        let thumbPath = artifactsDir.appendingPathComponent(thumbName).path
+        if let contentPath = artifact.contentPath {
+            // Try thumbnail first (name_thumb.png), fall back to original
+            let baseName = (contentPath as NSString).deletingPathExtension
+            let ext = (contentPath as NSString).pathExtension
+            let thumbName = "\(baseName)_thumb.\(ext)"
+            let thumbPath = artifactsDir.appendingPathComponent(thumbName).path
 
-        if FileManager.default.fileExists(atPath: thumbPath) {
-            return thumbPath
+            if FileManager.default.fileExists(atPath: thumbPath) {
+                return thumbPath
+            }
+
+            // Fall back to original image
+            let fullPath = artifactsDir.appendingPathComponent(contentPath).path
+            if FileManager.default.fileExists(atPath: fullPath) {
+                return fullPath
+            }
+
+            // Legacy fallback: contentPath might be filename-only, search in date dirs
+            if !contentPath.contains("/") {
+                let legacyThumbName = "\(baseName)_thumb.\(ext)"
+                if let found = Self.findFileInArtifacts(named: legacyThumbName, baseDir: artifactsDir) {
+                    return found
+                }
+                if let found = Self.findFileInArtifacts(named: contentPath, baseDir: artifactsDir) {
+                    return found
+                }
+            }
         }
 
-        // Fall back to original image
-        let fullPath = artifactsDir.appendingPathComponent(contentPath).path
-        if FileManager.default.fileExists(atPath: fullPath) {
-            return fullPath
+        // Fallback: search by artifact ID (handles fresh sync where content_path is nil)
+        let thumbByID = "\(artifact.id)_thumb.png"
+        if let found = Self.findFileInArtifacts(named: thumbByID, baseDir: artifactsDir) {
+            return found
         }
-
-        // Legacy fallback: contentPath might be filename-only, search in date dirs
-        if !contentPath.contains("/") {
-            let legacyThumbName = "\(baseName)_thumb.\(ext)"
-            if let found = Self.findFileInArtifacts(named: legacyThumbName, baseDir: artifactsDir) {
-                return found
-            }
-            if let found = Self.findFileInArtifacts(named: contentPath, baseDir: artifactsDir) {
-                return found
-            }
+        let fullByID = "\(artifact.id).png"
+        if let found = Self.findFileInArtifacts(named: fullByID, baseDir: artifactsDir) {
+            return found
         }
 
         return nil

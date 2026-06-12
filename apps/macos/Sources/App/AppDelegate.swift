@@ -22,6 +22,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Check and prompt for Accessibility permissions (required for global hotkey)
         requestAccessibilityIfNeeded()
 
+        // Check and prompt for Screen Recording permission (required for ScreenCaptureKit)
+        requestScreenCaptureIfNeeded()
+
         // Initialize settings panel with hotkey manager and artifact count
         settingsPanel = SettingsPanel(
             authService: authService,
@@ -82,6 +85,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Request post event access (triggers Input Monitoring prompt)
             CGRequestPostEventAccess()
             print("[Bundle] Input Monitoring permission not granted. Requesting access.")
+        }
+    }
+
+    // MARK: - Screen Capture Permissions
+
+    private func requestScreenCaptureIfNeeded() {
+        let hasAccess = CGPreflightScreenCaptureAccess()
+        print("[Bundle] CGPreflightScreenCaptureAccess: \(hasAccess)")
+
+        if !hasAccess {
+            // Triggers the system prompt directing user to System Settings → Screen Recording
+            let granted = CGRequestScreenCaptureAccess()
+            print("[Bundle] CGRequestScreenCaptureAccess result: \(granted)")
+            if !granted {
+                print("[Bundle] Screen Recording permission not granted. Enable in System Settings → Privacy & Security → Screen Recording")
+            }
         }
     }
 
@@ -148,8 +167,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
 
             if let response = response {
-                try? localDatabase.updateArtifactStatus(
-                    id: result.artifactId,
+                try? localDatabase.replaceArtifactId(
+                    oldId: result.artifactId,
+                    newId: response.id.uuidString,
                     status: response.status
                 )
                 print("[Bundle] Note uploaded: \(response.id)")
@@ -200,8 +220,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
 
             if let response = response {
-                try? localDatabase.updateArtifactStatus(
-                    id: artifactId,
+                try? localDatabase.replaceArtifactId(
+                    oldId: artifactId,
+                    newId: response.id.uuidString,
                     status: response.status
                 )
                 print("[Bundle] Link uploaded: \(response.id)")
@@ -249,9 +270,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
 
             if let response = response {
-                // Update local DB with backend ID and synced status
-                try? localDatabase.updateArtifactStatus(
-                    id: result.artifactId,
+                // Replace local ID with backend ID so sync won't create a duplicate
+                try? localDatabase.replaceArtifactId(
+                    oldId: result.artifactId,
+                    newId: response.id.uuidString,
                     status: response.status
                 )
                 print("[Bundle] Screenshot uploaded: \(response.id)")

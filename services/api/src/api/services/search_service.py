@@ -5,7 +5,7 @@ import uuid
 import asyncpg
 import structlog
 
-from api.processing.providers import EmbeddingProvider
+from api.processing.nim_embedding_provider import NimEmbeddingProvider
 
 logger = structlog.get_logger("api.search_service")
 
@@ -19,7 +19,7 @@ MAX_RESULTS = 40
 
 async def hybrid_search(
     pool: asyncpg.Pool,
-    embedding_provider: EmbeddingProvider,
+    embedding_provider: NimEmbeddingProvider,
     user_id: uuid.UUID,
     query: str,
 ) -> list[dict]:
@@ -38,9 +38,11 @@ async def hybrid_search(
     if not query_text:
         return []
 
-    # Embed the search query using the same model as artifact embeddings
+    # Embed the search query using the same model as artifact embeddings.
+    # NIM providers distinguish between query and passage embeddings for
+    # better retrieval quality. Use embed_query() when available.
     logger.info("search_embedding_query", query_length=len(query_text))
-    query_embedding = await embedding_provider.embed(query_text)
+    query_embedding = await embedding_provider.embed_query(query_text)
 
     # Execute hybrid search query
     # Matches artifacts where:
@@ -111,7 +113,9 @@ async def hybrid_search(
             "updated_at": row["updated_at"],
             "tags": tags_by_artifact.get(row["id"], []),
             "text_rank": float(row["text_rank"]) if row["text_rank"] else 0.0,
-            "vector_similarity": float(row["vector_similarity"]) if row["vector_similarity"] else 0.0,
+            "vector_similarity": float(row["vector_similarity"])
+            if row["vector_similarity"]
+            else 0.0,
         }
         for row in rows
     ]

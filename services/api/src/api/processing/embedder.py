@@ -13,6 +13,12 @@ class Embedder:
     def __init__(self, provider: EmbeddingProvider) -> None:
         self.provider = provider
 
+    @property
+    def model_name(self) -> str:
+        """The model identifier used by the underlying provider."""
+        model = getattr(self.provider, "model", "unknown")
+        return model if isinstance(model, str) else "unknown"
+
     async def embed(self, text: str) -> list[float]:
         """Generate an embedding vector for the given text.
 

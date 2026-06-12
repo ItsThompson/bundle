@@ -27,10 +27,10 @@ def mock_llm_provider() -> AsyncMock:
 
 @pytest.fixture
 def mock_embedding_provider() -> AsyncMock:
-    """Mock embedding provider that returns a 1536-dim vector."""
+    """Mock embedding provider that returns a 1024-dim vector."""
     provider = AsyncMock()
-    provider.embed.return_value = [0.1] * 1536
-    provider.dimensions = 1536
+    provider.embed.return_value = [0.1] * 1024
+    provider.dimensions = 1024
     return provider
 
 
@@ -171,6 +171,28 @@ class TestTagger:
         tags = await tagger.tag_text("test")
         assert tags == ["valid", "also-valid", "third"]
 
+    @pytest.mark.asyncio
+    async def test_extracts_json_from_mixed_text(
+        self, tagger: Tagger, mock_llm_provider: AsyncMock
+    ) -> None:
+        """Parser extracts JSON array embedded in surrounding text."""
+        mock_llm_provider.complete.return_value = (
+            'Here are the tags:\n["design", "typography", "web"]\nHope that helps!'
+        )
+        tags = await tagger.tag_text("test")
+        assert tags == ["design", "typography", "web"]
+
+    @pytest.mark.asyncio
+    async def test_parse_error_on_no_extractable_json(
+        self, tagger: Tagger, mock_llm_provider: AsyncMock
+    ) -> None:
+        """TagParseError raised when no JSON array is found anywhere in response."""
+        mock_llm_provider.complete.return_value = (
+            "The tags are: design, typography, web. These are the best tags."
+        )
+        with pytest.raises(TagParseError, match="Invalid JSON"):
+            await tagger.tag_text("test content")
+
 
 # --- Embedder Tests ---
 
@@ -180,7 +202,7 @@ class TestEmbedder:
     async def test_embed_returns_vector(self, embedder: Embedder) -> None:
         """embed returns vector from provider."""
         result = await embedder.embed("some text")
-        assert len(result) == 1536
+        assert len(result) == 1024
         assert all(v == 0.1 for v in result)
 
     @pytest.mark.asyncio
@@ -189,7 +211,7 @@ class TestEmbedder:
     ) -> None:
         """Empty text returns zero vector without calling provider."""
         result = await embedder.embed("   ")
-        assert len(result) == 1536
+        assert len(result) == 1024
         assert all(v == 0.0 for v in result)
 
     @pytest.mark.asyncio
@@ -235,8 +257,7 @@ class TestProcessingWorker:
         """Settings for worker tests."""
         return Settings(
             database_url="postgresql://test:test@localhost:5433/test",
-            anthropic_api_key="test-key",
-            openai_api_key="test-key",
+            nvidia_api_key="nvapi-test-key",
             max_processing_attempts=3,
             processing_poll_interval_seconds=1,
             artifacts_path="/tmp/test-artifacts",
@@ -314,7 +335,7 @@ class TestProcessingWorker:
         tags, embedding = await worker._generate_tags_and_embedding(mock_record)
 
         assert tags == ["tag-one", "tag-two", "tag-three"]
-        assert len(embedding) == 1536
+        assert len(embedding) == 1024
         mock_llm_provider.complete.assert_called_once()
         mock_embedding_provider.embed.assert_called_once_with(
             "Design patterns for mobile navigation"

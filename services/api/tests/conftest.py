@@ -96,11 +96,12 @@ def _setup_test_db() -> Generator[None, None, None]:
                     UNIQUE (artifact_id, name)
                 )
             """)
+            await conn.execute("DROP TABLE IF EXISTS public.artifact_embeddings")
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS public.artifact_embeddings (
                     artifact_id UUID PRIMARY KEY REFERENCES artifacts(id) ON DELETE CASCADE,
-                    embedding vector(1536) NOT NULL,
-                    model TEXT NOT NULL DEFAULT 'text-embedding-3-small',
+                    embedding vector(1024) NOT NULL,
+                    model TEXT NOT NULL DEFAULT 'nvidia/nv-embedqa-e5-v5',
                     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
                 )
             """)

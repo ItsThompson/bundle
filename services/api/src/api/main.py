@@ -29,18 +29,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
     logger.info("pool_created")
 
-    # Start the processing worker if LLM keys are configured
+    # Start the processing worker if NVIDIA API key is configured
     worker = None
-    if settings.anthropic_api_key and settings.openai_api_key:
-        from api.processing.anthropic_provider import AnthropicProvider
+    if settings.nvidia_api_key:
         from api.processing.embedder import Embedder
-        from api.processing.openai_provider import OpenAIEmbeddingProvider
+        from api.processing.nim_embedding_provider import NimEmbeddingProvider
+        from api.processing.nim_llm_provider import NimLLMProvider
         from api.processing.tagger import Tagger
         from api.processing.worker import ProcessingWorker
         from api.services import processing_service
 
-        llm_provider = AnthropicProvider(api_key=settings.anthropic_api_key)
-        embedding_provider = OpenAIEmbeddingProvider(api_key=settings.openai_api_key)
+        llm_provider = NimLLMProvider(
+            api_key=settings.nvidia_api_key,
+            model=settings.nim_llm_model,
+        )
+        embedding_provider = NimEmbeddingProvider(
+            api_key=settings.nvidia_api_key,
+            model=settings.nim_embedding_model,
+        )
         tagger = Tagger(provider=llm_provider)
         embedder = Embedder(provider=embedding_provider)
 
@@ -57,7 +63,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await worker.start()
         logger.info("processing_worker_started")
     else:
-        logger.warning("processing_worker_skipped", reason="missing API keys")
+        logger.warning("processing_worker_skipped", reason="missing NVIDIA_API_KEY")
 
     yield
 

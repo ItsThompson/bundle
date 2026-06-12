@@ -159,9 +159,7 @@ class ProcessingWorker:
             case _:
                 raise ValueError(f"Unknown artifact type: {artifact_type}")
 
-    async def _process_screenshot(
-        self, artifact: asyncpg.Record
-    ) -> tuple[list[str], list[float]]:
+    async def _process_screenshot(self, artifact: asyncpg.Record) -> tuple[list[str], list[float]]:
         """Process screenshot: read image, tag via vision, embed tags."""
         storage_path = Path(self.settings.artifacts_path) / artifact["storage_path"]
         image_bytes = storage_path.read_bytes()
@@ -177,9 +175,7 @@ class ProcessingWorker:
 
         return tags, embedding
 
-    async def _process_note(
-        self, artifact: asyncpg.Record
-    ) -> tuple[list[str], list[float]]:
+    async def _process_note(self, artifact: asyncpg.Record) -> tuple[list[str], list[float]]:
         """Process note: tag text, embed full text."""
         text = artifact["content_text"] or ""
 
@@ -191,9 +187,7 @@ class ProcessingWorker:
 
         return tags, embedding
 
-    async def _process_link(
-        self, artifact: asyncpg.Record
-    ) -> tuple[list[str], list[float]]:
+    async def _process_link(self, artifact: asyncpg.Record) -> tuple[list[str], list[float]]:
         """Process link: fetch URL content, tag it; fallback to URL-only tagging."""
         url = artifact["content_text"] or ""
 
@@ -270,7 +264,7 @@ class ProcessingWorker:
                     """,
                 artifact_id,
                 embedding_str,
-                "text-embedding-3-small",
+                self.embedder.model_name,
             )
 
             # Mark as completed
@@ -289,9 +283,7 @@ class ProcessingWorker:
         attempts = artifact["attempts"] + 1
         max_attempts = self.settings.max_processing_attempts
 
-        is_retryable = isinstance(exc, TagParseError) or not isinstance(
-            exc, ValueError
-        )
+        is_retryable = isinstance(exc, TagParseError) or not isinstance(exc, ValueError)
 
         if not is_retryable or attempts >= max_attempts:
             # Mark as permanently failed

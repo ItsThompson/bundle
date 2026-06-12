@@ -11,10 +11,10 @@ TEST_DATABASE_URL = "postgresql://bundle:bundle_dev@localhost:5433/bundle_test"
 
 
 def _fake_embedding(seed: float = 0.5) -> list[float]:
-    """Generate a deterministic fake embedding vector (1536 dimensions)."""
+    """Generate a deterministic fake embedding vector (1024 dimensions)."""
     import math
 
-    return [math.sin(i * seed) * 0.5 for i in range(1536)]
+    return [math.sin(i * seed) * 0.5 for i in range(1024)]
 
 
 class TestSearchEndpoint:
@@ -75,8 +75,8 @@ class TestSearchEndpoint:
 
         # Mock embedding provider: return a fake embedding for the query
         mock_provider = AsyncMock()
-        mock_provider.embed = AsyncMock(return_value=_fake_embedding(0.1))
-        mock_provider.dimensions = 1536
+        mock_provider.embed_query = AsyncMock(return_value=_fake_embedding(0.1))
+        mock_provider.dimensions = 1024
         client.app.state.embedding_provider = mock_provider
 
         response = client.get(
@@ -128,8 +128,8 @@ class TestSearchEndpoint:
 
         # Mock embedding provider
         mock_provider = AsyncMock()
-        mock_provider.embed = AsyncMock(return_value=_fake_embedding(0.2))
-        mock_provider.dimensions = 1536
+        mock_provider.embed_query = AsyncMock(return_value=_fake_embedding(0.2))
+        mock_provider.dimensions = 1024
         client.app.state.embedding_provider = mock_provider
 
         response = client.get(
@@ -163,8 +163,8 @@ class TestSearchEndpoint:
 
         # Mock embedding provider: return embedding far from any stored embedding
         mock_provider = AsyncMock()
-        mock_provider.embed = AsyncMock(return_value=_fake_embedding(99.9))
-        mock_provider.dimensions = 1536
+        mock_provider.embed_query = AsyncMock(return_value=_fake_embedding(99.9))
+        mock_provider.dimensions = 1024
         client.app.state.embedding_provider = mock_provider
 
         response = client.get(
@@ -196,8 +196,8 @@ class TestSearchEndpoint:
 
         # Mock embedding provider
         mock_provider = AsyncMock()
-        mock_provider.embed = AsyncMock(return_value=_fake_embedding(0.3))
-        mock_provider.dimensions = 1536
+        mock_provider.embed_query = AsyncMock(return_value=_fake_embedding(0.3))
+        mock_provider.dimensions = 1024
         client.app.state.embedding_provider = mock_provider
 
         response = client.get(
@@ -227,8 +227,8 @@ class TestSearchEndpoint:
 
         # Mock embedding provider
         mock_provider = AsyncMock()
-        mock_provider.embed = AsyncMock(return_value=_fake_embedding(0.4))
-        mock_provider.dimensions = 1536
+        mock_provider.embed_query = AsyncMock(return_value=_fake_embedding(0.4))
+        mock_provider.dimensions = 1024
         client.app.state.embedding_provider = mock_provider
 
         response = client.get(
@@ -275,7 +275,7 @@ class TestSearchEndpoint:
         artifact_id = resp.json()["id"]
 
         # Insert a high-similarity embedding for this artifact
-        query_embedding = [0.5] * 1536  # Simplified: same as query will produce
+        query_embedding = [0.5] * 1024
 
         async def insert_embedding() -> None:
             conn = await asyncpg.connect(TEST_DATABASE_URL)
@@ -283,7 +283,7 @@ class TestSearchEndpoint:
                 await conn.execute(
                     """
                     INSERT INTO artifact_embeddings (artifact_id, embedding, model)
-                    VALUES ($1, $2::vector, 'text-embedding-3-small')
+                    VALUES ($1, $2::vector, 'nvidia/nv-embedqa-e5-v5')
                     """,
                     uuid.UUID(artifact_id),
                     str(query_embedding),
@@ -295,8 +295,8 @@ class TestSearchEndpoint:
 
         # Mock embedding provider to return the same embedding (perfect similarity)
         mock_provider = AsyncMock()
-        mock_provider.embed = AsyncMock(return_value=query_embedding)
-        mock_provider.dimensions = 1536
+        mock_provider.embed_query = AsyncMock(return_value=query_embedding)
+        mock_provider.dimensions = 1024
         client.app.state.embedding_provider = mock_provider
 
         # Search for something that won't text-match but will vector-match
@@ -337,8 +337,8 @@ class TestSearchEndpoint:
 
         # Mock embedding provider
         mock_provider = AsyncMock()
-        mock_provider.embed = AsyncMock(return_value=_fake_embedding(0.5))
-        mock_provider.dimensions = 1536
+        mock_provider.embed_query = AsyncMock(return_value=_fake_embedding(0.5))
+        mock_provider.dimensions = 1024
         client.app.state.embedding_provider = mock_provider
 
         # Second user searches: should find nothing
@@ -384,8 +384,8 @@ class TestSearchEndpoint:
 
         # Mock embedding provider: return embedding that won't match (no vector similarity)
         mock_provider = AsyncMock()
-        mock_provider.embed = AsyncMock(return_value=_fake_embedding(99.0))
-        mock_provider.dimensions = 1536
+        mock_provider.embed_query = AsyncMock(return_value=_fake_embedding(99.0))
+        mock_provider.dimensions = 1024
         client.app.state.embedding_provider = mock_provider
 
         # Search for the tag name

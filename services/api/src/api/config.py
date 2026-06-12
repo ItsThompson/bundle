@@ -24,11 +24,10 @@ class Settings(BaseSettings):
     db_pool_min_size: int = 2
     db_pool_max_size: int = 10
 
-    # LLM
-    anthropic_api_key: str | None = None
-    openai_api_key: str | None = None
-    llm_provider: str = "anthropic"
-    embedding_provider: str = "openai"
+    # LLM (NVIDIA NIM)
+    nvidia_api_key: str | None = None
+    nim_llm_model: str = "nvidia/nemotron-nano-12b-v2-vl"
+    nim_embedding_model: str = "nvidia/nv-embedqa-e5-v5"
 
     # Processing
     max_processing_attempts: int = 3

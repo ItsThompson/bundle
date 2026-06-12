@@ -10,6 +10,7 @@ class TestSettings:
     def test_default_values(self) -> None:
         """Settings should have sensible defaults when no env vars are set."""
         settings = Settings(
+            _env_file=None,
             database_url="postgresql://test:test@localhost:5432/test",
             jwt_secret="test-secret",
         )
@@ -40,10 +41,10 @@ class TestSettings:
         assert settings.sentry_dsn == "https://sentry.example.com/123"
 
     def test_optional_llm_keys_default_none(self) -> None:
-        """LLM API keys should default to None."""
+        """NVIDIA API key should default to None."""
         settings = Settings(
+            _env_file=None,
             database_url="postgresql://test:test@localhost:5432/test",
             jwt_secret="test-secret",
         )
-        assert settings.anthropic_api_key is None
-        assert settings.openai_api_key is None
+        assert settings.nvidia_api_key is None

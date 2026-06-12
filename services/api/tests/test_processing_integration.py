@@ -35,10 +35,11 @@ def mock_llm() -> AsyncMock:
 
 @pytest.fixture
 def mock_embeddings() -> AsyncMock:
-    """Mock embedding provider that returns 1536-dim vector."""
+    """Mock embedding provider that returns 1024-dim vector."""
     provider = AsyncMock()
-    provider.embed.return_value = [0.01 * i for i in range(1536)]
-    provider.dimensions = 1536
+    provider.embed.return_value = [0.01 * i for i in range(1024)]
+    provider.dimensions = 1024
+    provider.model = "nvidia/nv-embedqa-e5-v5"
     return provider
 
 
@@ -109,8 +110,7 @@ class TestProcessingIntegration:
 
             settings = Settings(
                 database_url=TEST_DATABASE_URL,
-                anthropic_api_key="test-key",
-                openai_api_key="test-key",
+                nvidia_api_key="nvapi-test-key",
                 max_processing_attempts=3,
                 processing_poll_interval_seconds=1,
                 artifacts_path="/tmp/test-artifacts",
@@ -151,7 +151,7 @@ class TestProcessingIntegration:
                     artifact_id,
                 )
                 assert emb is not None
-                assert emb["model"] == "text-embedding-3-small"
+                assert emb["model"] == "nvidia/nv-embedqa-e5-v5"
         finally:
             await pool.close()
 
@@ -179,8 +179,7 @@ class TestProcessingIntegration:
 
             settings = Settings(
                 database_url=TEST_DATABASE_URL,
-                anthropic_api_key="test-key",
-                openai_api_key="test-key",
+                nvidia_api_key="nvapi-test-key",
                 max_processing_attempts=3,
                 processing_poll_interval_seconds=1,
                 artifacts_path=str(tmp_path),
@@ -232,8 +231,7 @@ class TestProcessingIntegration:
 
             settings = Settings(
                 database_url=TEST_DATABASE_URL,
-                anthropic_api_key="test-key",
-                openai_api_key="test-key",
+                nvidia_api_key="nvapi-test-key",
                 max_processing_attempts=3,
                 processing_poll_interval_seconds=1,
                 artifacts_path="/tmp/test-artifacts",
@@ -277,8 +275,7 @@ class TestProcessingIntegration:
 
             settings = Settings(
                 database_url=TEST_DATABASE_URL,
-                anthropic_api_key="test-key",
-                openai_api_key="test-key",
+                nvidia_api_key="nvapi-test-key",
                 max_processing_attempts=3,
                 processing_poll_interval_seconds=1,
                 artifacts_path="/tmp/test-artifacts",

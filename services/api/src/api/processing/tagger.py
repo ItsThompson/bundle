@@ -1,6 +1,7 @@
 """Tagger: generates descriptive tags for artifacts using LLM APIs."""
 
 import json
+import re
 
 import structlog
 
@@ -68,7 +69,10 @@ class Tagger:
     def _parse_tags(self, response: str) -> list[str]:
         """Parse LLM response into a list of tag strings.
 
-        Raises TagParseError if the response is not valid JSON or not a list of strings.
+        Attempts direct JSON parse first, then extracts JSON arrays from
+        mixed text (some models prepend explanatory text before the array).
+
+        Raises TagParseError if no valid tag array can be extracted.
         """
         response = response.strip()
 
@@ -78,11 +82,14 @@ class Tagger:
             # Remove first and last lines (``` markers)
             response = "\n".join(lines[1:-1]).strip()
 
-        try:
-            parsed = json.loads(response)
-        except json.JSONDecodeError as exc:
+        parsed = self._try_parse_json_array(response)
+        if parsed is None:
+            # Fallback: extract JSON array from anywhere in the response
+            parsed = self._extract_json_array(response)
+
+        if parsed is None:
             logger.warning("tag_parse_failed", response=response[:200])
-            raise TagParseError(f"Invalid JSON in LLM response: {response[:100]}") from exc
+            raise TagParseError(f"Invalid JSON in LLM response: {response[:100]}")
 
         if not isinstance(parsed, list):
             raise TagParseError(f"Expected JSON array, got {type(parsed).__name__}")
@@ -95,3 +102,20 @@ class Tagger:
 
         # Clamp to max 7 tags
         return tags[:7]
+
+    def _try_parse_json_array(self, text: str) -> list | None:
+        """Attempt to parse text as a JSON array. Returns None on failure."""
+        try:
+            result = json.loads(text)
+            if isinstance(result, list):
+                return result
+        except json.JSONDecodeError:
+            pass
+        return None
+
+    def _extract_json_array(self, text: str) -> list | None:
+        """Extract the first JSON array from mixed text content."""
+        match = re.search(r"\[\s*\".*?\]", text, re.DOTALL)
+        if match:
+            return self._try_parse_json_array(match.group(0))
+        return None

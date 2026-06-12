@@ -19,11 +19,12 @@ final class SyncService: ObservableObject {
 
     private let apiClient: APIClient
     private let localDatabase: LocalDatabase
+    private let uploadService: ArtifactUploadService
     private var pollingTask: Task<Void, Never>?
     private var isActive = false
 
     /// Base polling interval in seconds.
-    private let baseInterval: TimeInterval = 30
+    private let baseInterval: TimeInterval = 5
 
     /// Maximum backoff interval (5 minutes).
     private let maxInterval: TimeInterval = 300
@@ -31,9 +32,10 @@ final class SyncService: ObservableObject {
     /// Current consecutive failure count for backoff calculation.
     private var consecutiveFailures = 0
 
-    init(apiClient: APIClient = APIClient(), localDatabase: LocalDatabase) {
+    init(apiClient: APIClient = APIClient(), localDatabase: LocalDatabase, uploadService: ArtifactUploadService = ArtifactUploadService()) {
         self.apiClient = apiClient
         self.localDatabase = localDatabase
+        self.uploadService = uploadService
     }
 
     // MARK: - Public API
@@ -80,8 +82,8 @@ final class SyncService: ObservableObject {
         defer { isSyncing = false }
 
         do {
-            let isInitialSync = try localDatabase.getArtifactCount() == 0
-            if isInitialSync {
+            let hasEverSynced = try localDatabase.getLastSyncTimestamp() != nil
+            if !hasEverSynced {
                 try await performInitialSync()
             } else {
                 try await performDeltaSync()
@@ -91,6 +93,9 @@ final class SyncService: ObservableObject {
             consecutiveFailures += 1
             print("[Bundle] Sync failed (attempt \(consecutiveFailures)): \(error.localizedDescription)")
         }
+
+        // Retry uploading any pending local artifacts
+        await retryPendingUploads()
     }
 
     /// Full sync: download all artifact metadata with progress indicator.
@@ -180,6 +185,71 @@ final class SyncService: ObservableObject {
         if !item.tags.isEmpty {
             try localDatabase.upsertTags(artifactId: item.id.uuidString, tags: item.tags)
         }
+    }
+
+    // MARK: - Retry Pending Uploads
+
+    /// Upload any local artifacts still in "pending" status (failed initial upload).
+    /// On success, updates local status to match the backend response.
+    private func retryPendingUploads() async {
+        let pendingArtifacts: [LocalArtifact]
+        do {
+            pendingArtifacts = try localDatabase.getPendingArtifacts()
+        } catch {
+            print("[Bundle] Failed to query pending artifacts: \(error)")
+            return
+        }
+
+        guard !pendingArtifacts.isEmpty else { return }
+        print("[Bundle] Retrying upload for \(pendingArtifacts.count) pending artifact(s)")
+
+        let artifactsDir = ArtifactContentService.defaultArtifactsDirectory
+
+        for artifact in pendingArtifacts {
+            guard !Task.isCancelled else { return }
+
+            let response: ArtifactUploadResponse?
+
+            switch artifact.type {
+            case "link":
+                guard let urlString = artifact.contentText else { continue }
+                response = await uploadService.uploadLink(
+                    url: urlString,
+                    createdAt: parseDate(artifact.createdAt)
+                )
+
+            case "screenshot", "note":
+                guard let contentPath = artifact.contentPath else { continue }
+                let fileURL = artifactsDir.appendingPathComponent(contentPath)
+                guard FileManager.default.fileExists(atPath: fileURL.path) else {
+                    print("[Bundle] Retry skip: file missing for \(artifact.id)")
+                    continue
+                }
+                response = await uploadService.uploadArtifact(
+                    fileURL: fileURL,
+                    type: artifact.type,
+                    createdAt: parseDate(artifact.createdAt)
+                )
+
+            default:
+                continue
+            }
+
+            if let response = response {
+                // Replace local ID with backend ID so sync won't create a duplicate
+                let backendId = response.id.uuidString
+                try? localDatabase.replaceArtifactId(
+                    oldId: artifact.id,
+                    newId: backendId,
+                    status: response.status
+                )
+                print("[Bundle] Retry upload succeeded: \(artifact.id) → \(backendId) (\(response.status))")
+            }
+        }
+    }
+
+    private func parseDate(_ isoString: String) -> Date {
+        ISO8601DateFormatter().date(from: isoString) ?? Date()
     }
 
     // MARK: - Backoff Calculation

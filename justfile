@@ -52,11 +52,10 @@ docker-build:
 macos-build:
     cd apps/macos && swift build
 
-# Build + sign macOS app (requires "Bundle Dev" cert in Keychain)
-# Create cert: Keychain Access → Certificate Assistant → Create a Certificate
-#   Name: "Bundle Dev", Type: Self Signed Root, Cert Type: Code Signing
+# Build + sign macOS app (requires a valid codesigning identity in Keychain)
+# Uses BUNDLE_SIGN_IDENTITY env var, or falls back to first available identity.
 macos-run:
     cd apps/macos && swift build
-    codesign -f -s "Bundle Dev" --entitlements apps/macos/Bundle.entitlements --identifier com.thompsnt.bundle apps/macos/.build/debug/Bundle
+    codesign -f -s "${BUNDLE_SIGN_IDENTITY:-Apple Development: hi.thompson@hotmail.com (3K9A67H5C3)}" --entitlements apps/macos/Bundle.entitlements --identifier com.thompsnt.bundle apps/macos/.build/debug/Bundle
     @echo "Launching Bundle..."
-    apps/macos/.build/debug/Bundle &
+    apps/macos/.build/debug/Bundle

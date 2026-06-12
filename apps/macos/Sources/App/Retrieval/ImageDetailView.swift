@@ -1,25 +1,38 @@
 import SwiftUI
 
 /// Full-resolution image viewer with zoom (scroll wheel / pinch) and pan support.
-/// Uses NSScrollView + NSImageView under the hood for smooth magnification.
 struct ImageDetailView: View {
     let imageURL: URL
 
-    @State private var magnification: CGFloat = 1.0
     @State private var nsImage: NSImage?
+    @State private var scale: CGFloat = 1.0
+    @State private var lastScale: CGFloat = 1.0
+    @State private var offset: CGSize = .zero
+    @State private var lastOffset: CGSize = .zero
 
-    private let minMagnification: CGFloat = 1.0
-    private let maxMagnification: CGFloat = 5.0
+    private let minScale: CGFloat = 1.0
+    private let maxScale: CGFloat = 5.0
 
     var body: some View {
         Group {
             if let image = nsImage {
-                ZoomableImageView(
-                    image: image,
-                    magnification: $magnification,
-                    minMagnification: minMagnification,
-                    maxMagnification: maxMagnification
-                )
+                GeometryReader { geometry in
+                    let fittedSize = fittedImageSize(
+                        imageSize: image.size,
+                        containerSize: geometry.size
+                    )
+
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: fittedSize.width * scale, height: fittedSize.height * scale)
+                        .offset(offset)
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .clipped()
+                        .gesture(magnificationGesture)
+                        .gesture(dragGesture)
+                        .onTapGesture(count: 2) { resetZoom() }
+                }
             } else {
                 loadingPlaceholder
             }
@@ -37,65 +50,59 @@ struct ImageDetailView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    // MARK: - Gestures
+
+    private var magnificationGesture: some Gesture {
+        MagnifyGesture()
+            .onChanged { value in
+                let newScale = lastScale * value.magnification
+                scale = min(max(newScale, minScale), maxScale)
+            }
+            .onEnded { _ in
+                lastScale = scale
+                if scale <= minScale {
+                    resetZoom()
+                }
+            }
+    }
+
+    private var dragGesture: some Gesture {
+        DragGesture()
+            .onChanged { value in
+                guard scale > minScale else { return }
+                offset = CGSize(
+                    width: lastOffset.width + value.translation.width,
+                    height: lastOffset.height + value.translation.height
+                )
+            }
+            .onEnded { _ in
+                lastOffset = offset
+            }
+    }
+
+    // MARK: - Helpers
+
+    private func resetZoom() {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            scale = 1.0
+            lastScale = 1.0
+            offset = .zero
+            lastOffset = .zero
+        }
+    }
+
+    private func fittedImageSize(imageSize: NSSize, containerSize: CGSize) -> CGSize {
+        guard imageSize.width > 0, imageSize.height > 0 else { return .zero }
+        let scaleX = containerSize.width / imageSize.width
+        let scaleY = containerSize.height / imageSize.height
+        let fitScale = min(scaleX, scaleY, 1.0)
+        return CGSize(
+            width: imageSize.width * fitScale,
+            height: imageSize.height * fitScale
+        )
+    }
+
     private func loadImage() {
         nsImage = NSImage(contentsOf: imageURL)
-    }
-}
-
-/// NSViewRepresentable wrapping NSScrollView + NSImageView for native zoom/pan.
-struct ZoomableImageView: NSViewRepresentable {
-    let image: NSImage
-    @Binding var magnification: CGFloat
-    let minMagnification: CGFloat
-    let maxMagnification: CGFloat
-
-    func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = NSScrollView()
-        scrollView.hasVerticalScroller = true
-        scrollView.hasHorizontalScroller = true
-        scrollView.borderType = .noBorder
-        scrollView.backgroundColor = .clear
-        scrollView.allowsMagnification = true
-        scrollView.minMagnification = 0.1
-        scrollView.maxMagnification = maxMagnification
-
-        let imageView = NSImageView()
-        imageView.image = image
-        imageView.imageScaling = .scaleNone
-        imageView.setFrameSize(image.size)
-
-        scrollView.documentView = imageView
-
-        // Fit image to scroll view on first layout
-        DispatchQueue.main.async {
-            self.fitImageToView(in: scrollView)
-        }
-
-        return scrollView
-    }
-
-    func updateNSView(_ scrollView: NSScrollView, context: Context) {
-        // Only update image if it actually changed (avoid resetting user zoom/pan)
-        if let imageView = scrollView.documentView as? NSImageView,
-           imageView.image !== image {
-            imageView.image = image
-            imageView.setFrameSize(image.size)
-        }
-        // Do NOT reset magnification here: the user controls zoom via scroll/pinch.
-        // The NSScrollView handles magnification natively.
-    }
-
-    private func fitImageToView(in scrollView: NSScrollView) {
-        let viewSize = scrollView.contentSize
-        let imageSize = image.size
-
-        guard imageSize.width > 0, imageSize.height > 0 else { return }
-
-        let scaleX = viewSize.width / imageSize.width
-        let scaleY = viewSize.height / imageSize.height
-        let fitScale = min(scaleX, scaleY, 1.0) // Don't upscale small images
-
-        scrollView.minMagnification = fitScale
-        scrollView.magnification = fitScale
     }
 }

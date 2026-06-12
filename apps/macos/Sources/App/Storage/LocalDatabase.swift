@@ -148,6 +148,28 @@ final class LocalDatabase {
         }
     }
 
+    /// Replace a local artifact's ID with the backend ID after successful upload.
+    /// This ensures the sync's upsert will merge rather than create a duplicate.
+    func replaceArtifactId(oldId: String, newId: String, status: String) throws {
+        let sql = "UPDATE artifacts SET id = ?, status = ?, synced_at = ? WHERE id = ?"
+        let syncedAt = ISO8601DateFormatter().string(from: Date())
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw LocalDatabaseError.prepareFailed(lastError)
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_text(stmt, 1, (newId as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(stmt, 2, (status as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(stmt, 3, (syncedAt as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(stmt, 4, (oldId as NSString).utf8String, -1, nil)
+
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw LocalDatabaseError.updateFailed(lastError)
+        }
+    }
+
     /// Get all pending artifacts (for retry upload).
     func getPendingArtifacts() throws -> [LocalArtifact] {
         let sql = "SELECT id, type, content_path, content_text, status, created_at, synced_at FROM artifacts WHERE status = 'pending' ORDER BY created_at ASC"

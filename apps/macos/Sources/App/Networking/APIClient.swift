@@ -70,7 +70,7 @@ final class APIClient {
 
     /// Default backend URL: production hardcoded, overridable via BUNDLE_API_URL env.
     static var defaultBaseURL: String {
-        ProcessInfo.processInfo.environment["BUNDLE_API_URL"] ?? "https://bundle-api.thompsnt.dev"
+        ProcessInfo.processInfo.environment["BUNDLE_API_URL"] ?? "http://localhost:8018"
     }
 
     // MARK: - Public Request Method

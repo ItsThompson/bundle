@@ -6,6 +6,7 @@ re-validates each redirect hop, and caps response size at 1MB.
 
 import ipaddress
 import socket
+from collections.abc import Callable
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
@@ -13,6 +14,9 @@ import httpx
 import structlog
 
 logger = structlog.get_logger("api.processing.safe_url_fetcher")
+
+# Type for the DNS resolver callable (same signature as socket.getaddrinfo)
+DnsResolver = Callable[[str, None, int, int], list[tuple]]
 
 
 class SSRFError(Exception):
@@ -60,23 +64,23 @@ class SafeURLFetcher:
     def __init__(
         self,
         *,
-        resolver: object | None = None,
+        resolver: DnsResolver | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         """Initialize the fetcher.
 
         Args:
             resolver: Optional DNS resolver callable for testing.
-                      Signature: (hostname: str) -> list[tuple[...]] (same as socket.getaddrinfo).
+                      Signature matches socket.getaddrinfo.
                       If None, uses socket.getaddrinfo.
             transport: Optional httpx transport for testing.
                       If provided, the fetcher uses this transport instead of real network.
         """
-        self._resolver = resolver or socket.getaddrinfo
+        self._resolver: DnsResolver = resolver or socket.getaddrinfo
         self._transport = transport
 
     async def fetch(self, url: str) -> FetchResult:
-        """Fetch URL content safely.
+        """Fetch URL content safely with streaming response body.
 
         Raises:
             SSRFError: On policy violation (private IP, bad scheme, too large, etc.)
@@ -98,9 +102,13 @@ class SafeURLFetcher:
 
         async with httpx.AsyncClient(**client_kwargs) as client:
             while True:
-                response = await client.get(current_url)
+                response = await client.send(
+                    client.build_request("GET", current_url),
+                    stream=True,
+                )
 
                 if response.is_redirect:
+                    await response.aclose()
                     redirects += 1
                     if redirects > self.MAX_REDIRECTS:
                         raise SSRFError("Too many redirects")
@@ -116,10 +124,14 @@ class SafeURLFetcher:
                     current_url = redirect_url
                     continue
 
+                # Stream-read the response body with size cap
+                try:
+                    content = await self._stream_response_with_cap(response)
+                finally:
+                    await response.aclose()
+
                 break
 
-        # Stream-read the response body with size cap
-        content = self._read_response_with_cap(response)
         content_type = response.headers.get("content-type", "")
 
         return FetchResult(
@@ -171,13 +183,21 @@ class SafeURLFetcher:
 
         return any(ip in network for network in self.BLOCKED_NETWORKS)
 
-    def _read_response_with_cap(self, response: httpx.Response) -> bytes:
-        """Read response content with 1MB byte cap.
+    async def _stream_response_with_cap(self, response: httpx.Response) -> bytes:
+        """Stream response body with 1MB byte cap.
+
+        Reads chunks incrementally: never buffers more than MAX_RESPONSE_BYTES.
 
         Raises:
             SSRFError: If response exceeds MAX_RESPONSE_BYTES.
         """
-        content = response.content
-        if len(content) > self.MAX_RESPONSE_BYTES:
-            raise SSRFError("Response exceeds 1MB")
-        return content
+        chunks: list[bytes] = []
+        total_bytes = 0
+
+        async for chunk in response.aiter_bytes(chunk_size=self.CHUNK_SIZE):
+            total_bytes += len(chunk)
+            if total_bytes > self.MAX_RESPONSE_BYTES:
+                raise SSRFError("Response exceeds 1MB")
+            chunks.append(chunk)
+
+        return b"".join(chunks)

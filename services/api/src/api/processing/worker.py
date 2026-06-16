@@ -234,17 +234,6 @@ class ProcessingWorker:
 
         return tags, embedding
 
-    async def _fetch_link_content(self, url: str) -> str:
-        """Fetch URL content via SafeURLFetcher, strip HTML, return plain text."""
-        result = await self.url_fetcher.fetch(url)
-        content_type = result.content_type
-        text = result.content.decode("utf-8", errors="replace")
-
-        if "html" in content_type:
-            text = self._strip_html(text)
-
-        return text.strip()
-
     def _strip_html(self, html: str) -> str:
         """Simple HTML tag stripping for link content extraction."""
         # Remove script and style blocks

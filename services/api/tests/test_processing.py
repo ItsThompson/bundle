@@ -437,6 +437,8 @@ class TestProcessingWorker:
         """Link processing falls back to URL-only tagging when fetch fails."""
         import httpx
 
+        from api.processing.safe_url_fetcher import SafeURLFetcher
+
         artifact = {
             "id": uuid.uuid4(),
             "type": "link",
@@ -447,15 +449,17 @@ class TestProcessingWorker:
         mock_record = MagicMock()
         mock_record.__getitem__ = lambda self, key: artifact[key]
 
-        with patch("api.processing.worker.httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.get.side_effect = httpx.HTTPStatusError(
-                "403", request=MagicMock(), response=MagicMock()
-            )
-            mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+        # Inject a transport that raises a connection error
+        def error_handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("Connection refused")
 
-            tags, embedding = await worker._generate_tags_and_embedding(mock_record)
+        def public_resolver(hostname, port, family, socktype):
+            return [(family, socktype, 0, "", ("93.184.216.34", 0))]
+
+        transport = httpx.MockTransport(error_handler)
+        worker.url_fetcher = SafeURLFetcher(resolver=public_resolver, transport=transport)
+
+        tags, embedding = await worker._generate_tags_and_embedding(mock_record)
 
         assert tags == ["tag-one", "tag-two", "tag-three"]
         # Should embed the URL itself as fallback

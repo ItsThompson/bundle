@@ -150,28 +150,46 @@ class TestPrivateIPBlocking:
 class TestResponseSizeCap:
     """Tests for response body size limiting."""
 
-    def test_small_response_allowed(self) -> None:
+    @pytest.mark.anyio
+    async def test_small_response_allowed(self) -> None:
         """Response under 1MB should pass."""
-        fetcher = SafeURLFetcher()
-        response = httpx.Response(200, content=b"x" * 1000)
-        result = fetcher._read_response_with_cap(response)
-        assert len(result) == 1000
+        transport = httpx.MockTransport(
+            lambda request: httpx.Response(200, content=b"x" * 1000)
+        )
+        fetcher = SafeURLFetcher(
+            resolver=_make_resolver("93.184.216.34"),
+            transport=transport,
+        )
+        result = await fetcher.fetch("https://example.com/small")
+        assert len(result.content) == 1000
 
-    def test_response_at_1mb_allowed(self) -> None:
+    @pytest.mark.anyio
+    async def test_response_at_1mb_allowed(self) -> None:
         """Response at exactly 1MB should pass."""
-        fetcher = SafeURLFetcher()
         content = b"x" * (1024 * 1024)
-        response = httpx.Response(200, content=content)
-        result = fetcher._read_response_with_cap(response)
-        assert len(result) == 1024 * 1024
+        transport = httpx.MockTransport(
+            lambda request: httpx.Response(200, content=content)
+        )
+        fetcher = SafeURLFetcher(
+            resolver=_make_resolver("93.184.216.34"),
+            transport=transport,
+        )
+        result = await fetcher.fetch("https://example.com/exact")
+        assert len(result.content) == 1024 * 1024
 
-    def test_response_over_1mb_rejected(self) -> None:
+    @pytest.mark.anyio
+    async def test_response_over_1mb_rejected(self) -> None:
         """Response over 1MB should raise SSRFError."""
-        fetcher = SafeURLFetcher()
         content = b"x" * (1024 * 1024 + 1)
-        response = httpx.Response(200, content=content)
+        transport = httpx.MockTransport(
+            lambda request: httpx.Response(200, content=content)
+        )
+        fetcher = SafeURLFetcher(
+            resolver=_make_resolver("93.184.216.34"),
+            transport=transport,
+        )
         with pytest.raises(SSRFError, match="exceeds 1MB"):
-            fetcher._read_response_with_cap(response)
+            await fetcher.fetch("https://example.com/huge")
 
 
 class TestRedirectValidation:

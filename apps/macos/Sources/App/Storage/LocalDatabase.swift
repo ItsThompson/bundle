@@ -7,6 +7,9 @@ import SQLite3
 final class LocalDatabase {
     var db: OpaquePointer?
 
+    /// Whether the database connection is currently open.
+    var isOpen: Bool { db != nil }
+
     /// Path to the SQLite database file.
     private let dbPath: URL
 
@@ -29,12 +32,18 @@ final class LocalDatabase {
         let result = sqlite3_open(dbPath.path, &db)
         guard result == SQLITE_OK else {
             let message = String(cString: sqlite3_errmsg(db))
-            throw LocalDatabaseError.openFailed(message)
+            db = nil
+            throw DatabaseError.openFailed(underlying: LocalDatabaseError.openFailed(message))
         }
 
         // Enable WAL mode for better concurrency
-        try execute("PRAGMA journal_mode=WAL")
-        try createTables()
+        do {
+            try execute("PRAGMA journal_mode=WAL")
+            try createTables()
+        } catch {
+            close()
+            throw DatabaseError.migrationFailed(underlying: error)
+        }
     }
 
     /// Close the database connection.
@@ -56,9 +65,13 @@ final class LocalDatabase {
                 content_text TEXT,
                 status TEXT NOT NULL DEFAULT 'pending',
                 created_at TEXT NOT NULL,
-                synced_at TEXT
+                synced_at TEXT,
+                upload_state TEXT NOT NULL DEFAULT 'idle'
             )
         """)
+
+        // Add upload_state column if not present (schema evolution for existing DBs)
+        try? execute("ALTER TABLE artifacts ADD COLUMN upload_state TEXT NOT NULL DEFAULT 'idle'")
 
         try execute("""
             CREATE TABLE IF NOT EXISTS tags (
@@ -91,11 +104,14 @@ final class LocalDatabase {
         contentPath: String?,
         contentText: String?,
         status: String = "pending",
-        createdAt: Date
+        createdAt: Date,
+        uploadState: String = "idle"
     ) throws {
+        guard isOpen else { throw DatabaseError.notOpen }
+
         let sql = """
-            INSERT INTO artifacts (id, type, content_path, content_text, status, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO artifacts (id, type, content_path, content_text, status, created_at, upload_state)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         """
         let dateStr = ISO8601DateFormatter().string(from: createdAt)
 
@@ -122,6 +138,7 @@ final class LocalDatabase {
 
         sqlite3_bind_text(stmt, 5, (status as NSString).utf8String, -1, nil)
         sqlite3_bind_text(stmt, 6, (dateStr as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(stmt, 7, (uploadState as NSString).utf8String, -1, nil)
 
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw LocalDatabaseError.insertFailed(lastError)
@@ -130,6 +147,8 @@ final class LocalDatabase {
 
     /// Update artifact status after upload.
     func updateArtifactStatus(id: String, status: String) throws {
+        guard isOpen else { throw DatabaseError.notOpen }
+
         let sql = "UPDATE artifacts SET status = ?, synced_at = ? WHERE id = ?"
         let syncedAt = ISO8601DateFormatter().string(from: Date())
 
@@ -151,6 +170,8 @@ final class LocalDatabase {
     /// Replace a local artifact's ID with the backend ID after successful upload.
     /// This ensures the sync's upsert will merge rather than create a duplicate.
     func replaceArtifactId(oldId: String, newId: String, status: String) throws {
+        guard isOpen else { throw DatabaseError.notOpen }
+
         let sql = "UPDATE artifacts SET id = ?, status = ?, synced_at = ? WHERE id = ?"
         let syncedAt = ISO8601DateFormatter().string(from: Date())
 
@@ -255,6 +276,8 @@ final class LocalDatabase {
 
     /// Insert or update tags for an artifact.
     func upsertTags(artifactId: String, tags: [String]) throws {
+        guard isOpen else { throw DatabaseError.notOpen }
+
         // Delete existing tags using parameterized query
         let deleteSql = "DELETE FROM tags WHERE artifact_id = ?"
         var deleteStmt: OpaquePointer?
@@ -287,6 +310,28 @@ final class LocalDatabase {
         }
     }
 
+    // MARK: - Upload State
+
+    /// Update the upload state for an artifact.
+    func setUploadState(artifactId: String, state: String) throws {
+        guard isOpen else { throw DatabaseError.notOpen }
+
+        let sql = "UPDATE artifacts SET upload_state = ? WHERE id = ?"
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw LocalDatabaseError.prepareFailed(lastError)
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_text(stmt, 1, (state as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(stmt, 2, (artifactId as NSString).utf8String, -1, nil)
+
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw LocalDatabaseError.updateFailed(lastError)
+        }
+    }
+
     // MARK: - Sync Operations
 
     /// Insert or update an artifact from a backend sync response.
@@ -299,6 +344,8 @@ final class LocalDatabase {
         createdAt: Date,
         syncedAt: Date
     ) throws {
+        guard isOpen else { throw DatabaseError.notOpen }
+
         let sql = """
             INSERT INTO artifacts (id, type, content_text, status, created_at, synced_at)
             VALUES (?, ?, ?, ?, ?, ?)

@@ -148,6 +148,28 @@ def decode_refresh_token(token: str, settings: Settings) -> dict:
     return payload
 
 
+# --- Token revocation ---
+
+
+async def validate_token_not_revoked(
+    conn: asyncpg.Connection,
+    user_id: str,
+    token_iat: int,
+) -> None:
+    """Check if a token was issued before the user's revocation timestamp.
+
+    Raises TokenError if the token is revoked (iat < tokens_revoked_at).
+    """
+    revoked_at = await conn.fetchval(
+        "SELECT tokens_revoked_at FROM auth.users WHERE id = $1",
+        uuid.UUID(user_id),
+    )
+    if revoked_at is not None:
+        revoked_at_unix = int(revoked_at.timestamp())
+        if token_iat < revoked_at_unix:
+            raise TokenError("Token has been revoked")
+
+
 # --- Database operations ---
 
 

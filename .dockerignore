@@ -1,0 +1,17 @@
+.env
+.env.*
+.git/
+.gitignore
+data/
+pgdata/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+apps/
+docs/
+scripts/
+*.md
+lefthook.yml
+.github/

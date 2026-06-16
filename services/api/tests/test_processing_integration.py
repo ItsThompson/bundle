@@ -214,7 +214,7 @@ class TestProcessingIntegration:
         mock_embeddings: AsyncMock,
         _setup_test_db: None,
     ) -> None:
-        """Artifacts stuck in 'processing' are reset to 'pending' on startup."""
+        """Artifacts stuck in 'processing' for > 5 minutes are reset to 'pending' on startup."""
         pool = await self._create_pool()
         try:
             user_id = await self._insert_user(pool)
@@ -222,10 +222,10 @@ class TestProcessingIntegration:
                 pool, user_id, "note", "test/stuck.md", content_text="stuck note"
             )
 
-            # Manually set status to 'processing' (simulates crash)
+            # Manually set status to 'processing' with updated_at > 5 minutes ago (simulates crash)
             async with pool.acquire() as conn:
                 await conn.execute(
-                    "UPDATE artifacts SET status = 'processing' WHERE id = $1",
+                    "UPDATE artifacts SET status = 'processing', updated_at = now() - interval '10 minutes' WHERE id = $1",
                     artifact_id,
                 )
 

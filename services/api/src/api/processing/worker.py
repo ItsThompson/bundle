@@ -47,6 +47,12 @@ class ProcessingWorker:
         self.url_fetcher = url_fetcher or SafeURLFetcher()
         self.event = asyncio.Event()
         self._task: asyncio.Task | None = None
+        self._current_artifact_id: uuid.UUID | None = None
+
+    @property
+    def current_artifact_id(self) -> uuid.UUID | None:
+        """The ID of the artifact currently being processed (for graceful shutdown)."""
+        return self._current_artifact_id
 
     def notify(self) -> None:
         """Wake the worker immediately (called when a new artifact is uploaded)."""
@@ -68,17 +74,20 @@ class ProcessingWorker:
         logger.info("worker_stopped")
 
     async def _recover_stuck_artifacts(self) -> None:
-        """Reset any artifacts stuck in 'processing' status (crash recovery)."""
+        """Reset artifacts stuck in 'processing' longer than 5 minutes (scoped recovery)."""
         async with self.pool.acquire() as conn:
-            count = await conn.execute(
+            result = await conn.fetch(
                 """
                 UPDATE artifacts
                 SET status = $1, updated_at = now()
                 WHERE status = $2
+                  AND updated_at < now() - interval '5 minutes'
+                RETURNING id
                 """,
                 ProcessingStatus.PENDING,
                 ProcessingStatus.PROCESSING,
             )
+        count = len(result)
         logger.info("worker_recovery_complete", reset_count=count)
 
     async def _run_loop(self) -> None:
@@ -133,6 +142,7 @@ class ProcessingWorker:
         """Process a single artifact: generate tags and embedding."""
         artifact_id = artifact["id"]
         artifact_type = artifact["type"]
+        self._current_artifact_id = artifact_id
 
         logger.info(
             "processing_started",
@@ -151,6 +161,8 @@ class ProcessingWorker:
             )
         except Exception as exc:
             await self._handle_failure(artifact, exc)
+        finally:
+            self._current_artifact_id = None
 
     async def _generate_tags_and_embedding(
         self, artifact: asyncpg.Record

@@ -290,14 +290,16 @@ class TestProcessingWorker:
     async def test_recover_stuck_artifacts(
         self, worker: ProcessingWorker, mock_conn: AsyncMock
     ) -> None:
-        """Startup recovery resets 'processing' artifacts to 'pending'."""
+        """Startup recovery resets artifacts stuck > 5 minutes to 'pending'."""
+        mock_conn.fetch.return_value = []
         await worker._recover_stuck_artifacts()
 
-        mock_conn.execute.assert_called_once()
-        sql = mock_conn.execute.call_args[0][0]
-        args = mock_conn.execute.call_args[0][1:]
+        mock_conn.fetch.assert_called_once()
+        sql = mock_conn.fetch.call_args[0][0]
+        args = mock_conn.fetch.call_args[0][1:]
         assert "SET status" in sql
         assert "WHERE status" in sql
+        assert "interval '5 minutes'" in sql
         # Verify parameterized values: pending and processing
         assert "pending" in args
         assert "processing" in args

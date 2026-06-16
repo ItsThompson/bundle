@@ -37,6 +37,8 @@ async def create_artifact(
         ProcessingStatus.PENDING.value,
         created_at.astimezone(UTC),
     )
+    await conn.execute("SELECT pg_notify('artifact_ready', $1::text)", str(artifact_id))
+    logger.info("artifact_notify_sent", artifact_id=str(artifact_id))
     return dict(row)
 
 

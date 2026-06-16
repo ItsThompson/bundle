@@ -2,66 +2,6 @@
 import Foundation
 import Testing
 
-// MARK: - Mock Dependencies
-
-@MainActor
-final class MockLocalDatabase {
-    private let database: LocalDatabase
-    var insertedArtifacts: [(id: String, type: String, contentPath: String?, contentText: String?, status: String, uploadState: String)] = []
-    var replacedIds: [(oldId: String, newId: String, status: String)] = []
-    var uploadStateUpdates: [(artifactId: String, state: String)] = []
-
-    var isOpen: Bool { database.isOpen }
-
-    init() {
-        let tempDir = FileManager.default.temporaryDirectory
-        let dbPath = tempDir.appendingPathComponent("test_coordinator_\(UUID().uuidString).db")
-        database = LocalDatabase(dbPath: dbPath)
-    }
-
-    func open() throws {
-        try database.open()
-    }
-
-    func close() {
-        database.close()
-    }
-
-    var dbPath: URL {
-        // We need to access this for cleanup
-        let appSupport = FileManager.default.temporaryDirectory
-        return appSupport
-    }
-}
-
-/// A mock upload service that records calls and returns configurable responses.
-@MainActor
-final class MockUploadService {
-    var uploadArtifactCalls: [(fileURL: URL, type: String, createdAt: Date)] = []
-    var uploadLinkCalls: [(url: String, createdAt: Date)] = []
-    var uploadResponse: ArtifactUploadResponse?
-
-    func uploadArtifact(fileURL: URL, type: String, createdAt: Date) async -> ArtifactUploadResponse? {
-        uploadArtifactCalls.append((fileURL: fileURL, type: type, createdAt: createdAt))
-        return uploadResponse
-    }
-
-    func uploadLink(url: String, createdAt: Date) async -> ArtifactUploadResponse? {
-        uploadLinkCalls.append((url: url, createdAt: createdAt))
-        return uploadResponse
-    }
-}
-
-/// A mock PostCaptureThumbnail that records show calls.
-@MainActor
-final class MockPostCaptureThumbnail {
-    var shownContents: [(content: ThumbnailContent, artifactId: String)] = []
-
-    func show(content: ThumbnailContent, artifactId: String) {
-        shownContents.append((content: content, artifactId: artifactId))
-    }
-}
-
 // MARK: - Tests
 
 @Suite("CaptureCoordinator Tests")

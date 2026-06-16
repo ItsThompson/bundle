@@ -165,11 +165,4 @@ final class CaptureCoordinator {
         return fileURL.lastPathComponent
     }
 
-    private func showDatabaseUnavailableAlert() {
-        onDatabaseUnavailable()
-    }
-
-    private func showCaptureError(_ error: Error) {
-        onCaptureError(error)
-    }
 }

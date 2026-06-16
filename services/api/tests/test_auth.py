@@ -94,10 +94,10 @@ class TestLogin:
         self, client: TestClient, registered_user: dict[str, Any]
     ) -> None:
         """Exceeding rate limit returns 429."""
-        # Clear rate limit state for this test
-        from api.routers.auth import _login_attempts
+        # Clear rate limiter state for this test
+        from api.dependencies import _rate_limiter
 
-        _login_attempts.clear()
+        _rate_limiter._attempts.clear()
 
         # Make 10 attempts (limit)
         for _ in range(10):
@@ -112,7 +112,7 @@ class TestLogin:
             json={"email": "test@example.com", "password": "TestPass1"},
         )
         assert response.status_code == 429
-        assert "Too many login attempts" in response.json()["detail"]
+        assert "Rate limit exceeded" in response.json()["detail"]
 
 
 class TestRefresh:
@@ -359,3 +359,66 @@ class TestChangePassword:
         # Old token should be rejected
         response = client.get("/api/auth/me", headers=auth_headers)
         assert response.status_code == 401
+
+    def test_old_refresh_token_rejected_after_password_change(
+        self,
+        client: TestClient,
+        registered_user: dict[str, Any],
+        auth_headers: dict[str, str],
+    ) -> None:
+        """Refresh token issued before password change returns 401.
+
+        After password change, a compromised device cannot use a pre-change
+        refresh token to obtain new access tokens.
+        """
+        import time
+
+        time.sleep(1.1)
+
+        # Change password
+        client.post(
+            "/api/auth/me/password",
+            json={"current_password": "TestPass1", "new_password": "NewPass1x"},
+            headers=auth_headers,
+        )
+
+        # Old refresh token should be rejected
+        response = client.post(
+            "/api/auth/refresh",
+            json={"refresh_token": registered_user["refresh_token"]},
+        )
+        assert response.status_code == 401
+        assert "revoked" in response.json()["detail"].lower()
+
+    def test_new_tokens_work_after_password_change(
+        self,
+        client: TestClient,
+        registered_user: dict[str, Any],
+        auth_headers: dict[str, str],
+    ) -> None:
+        """Tokens issued after password change are accepted normally."""
+        import time
+
+        time.sleep(1.1)
+
+        # Change password: returns new tokens
+        response = client.post(
+            "/api/auth/me/password",
+            json={"current_password": "TestPass1", "new_password": "NewPass1x"},
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+        data = response.json()
+
+        # New access token works
+        new_headers = {"Authorization": f"Bearer {data['access_token']}"}
+        me_response = client.get("/api/auth/me", headers=new_headers)
+        assert me_response.status_code == 200
+
+        # New refresh token works
+        refresh_response = client.post(
+            "/api/auth/refresh",
+            json={"refresh_token": data["refresh_token"]},
+        )
+        assert refresh_response.status_code == 200
+        assert "access_token" in refresh_response.json()

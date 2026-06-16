@@ -48,17 +48,17 @@ enum HTTPMethod: String {
 final class APIClient {
     private let baseURL: String
     private let session: URLSession
-    private let tokenStore: TokenStore
+    private let tokenManager: TokenManager
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
 
     init(
         baseURL: String = APIClient.defaultBaseURL,
-        tokenStore: TokenStore = KeychainManager(),
+        tokenManager: TokenManager = TokenManager(),
         session: URLSession = .ephemeral
     ) {
         self.baseURL = baseURL
-        self.tokenStore = tokenStore
+        self.tokenManager = tokenManager
         self.session = session
 
         self.decoder = JSONDecoder()
@@ -137,7 +137,7 @@ final class APIClient {
         urlRequest.httpMethod = method.rawValue
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        if authenticated, let token = tokenStore.getAccessToken() {
+        if authenticated, let token = await tokenManager.getAccessToken() {
             urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
 
@@ -160,7 +160,7 @@ final class APIClient {
 
         // Handle 401: attempt token refresh and retry once
         if httpResponse.statusCode == 401 && authenticated && !isRetry {
-            let refreshed = await attemptTokenRefresh()
+            let refreshed = await tokenManager.refreshIfNeeded()
             if refreshed {
                 return try await performRequest(
                     method: method,
@@ -226,7 +226,7 @@ final class APIClient {
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = method.rawValue
 
-        if authenticated, let token = tokenStore.getAccessToken() {
+        if authenticated, let token = await tokenManager.getAccessToken() {
             urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
 
@@ -244,7 +244,7 @@ final class APIClient {
         }
 
         if httpResponse.statusCode == 401 && authenticated && !isRetry {
-            let refreshed = await attemptTokenRefresh()
+            let refreshed = await tokenManager.refreshIfNeeded()
             if refreshed {
                 return try await performRawRequest(
                     method: method,
@@ -264,47 +264,6 @@ final class APIClient {
         return data
     }
 
-    /// Attempt to refresh the access token using the stored refresh token.
-    /// Returns true if refresh succeeded, false if session is fully expired.
-    private func attemptTokenRefresh() async -> Bool {
-        guard let refreshToken = tokenStore.getRefreshToken() else {
-            return false
-        }
-
-        guard let url = URL(string: baseURL + "/api/auth/refresh") else {
-            return false
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        let body = RefreshRequest(refreshToken: refreshToken)
-        guard let bodyData = try? encoder.encode(body) else {
-            return false
-        }
-        request.httpBody = bodyData
-
-        do {
-            let (data, response) = try await session.data(for: request)
-            guard let httpResponse = response as? HTTPURLResponse,
-                  httpResponse.statusCode == 200 else {
-                // Refresh failed: clear tokens, session is expired
-                tokenStore.deleteTokens()
-                return false
-            }
-
-            let tokenResponse = try decoder.decode(TokenResponse.self, from: data)
-            try tokenStore.saveTokens(
-                access: tokenResponse.accessToken,
-                refresh: tokenResponse.refreshToken
-            )
-            return true
-        } catch {
-            tokenStore.deleteTokens()
-            return false
-        }
-    }
 }
 
 // MARK: - URLSession Extension

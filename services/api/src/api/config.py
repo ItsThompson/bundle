@@ -1,6 +1,9 @@
 """Environment-based application configuration using pydantic-settings."""
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+KNOWN_INSECURE_SECRETS = frozenset({"change-me-in-production", "secret", "dev-secret"})
 
 
 class Settings(BaseSettings):
@@ -11,8 +14,9 @@ class Settings(BaseSettings):
     # Database
     database_url: str = "postgresql://bundle:bundle_dev@localhost:5433/bundle"
 
-    # Auth
-    jwt_secret: str = "change-me-in-production"
+    # Auth - NO DEFAULT: forces explicit setting
+    jwt_secret: str
+
     jwt_access_ttl_minutes: int = 15
     jwt_refresh_ttl_days: int = 7
     bcrypt_cost: int = 12
@@ -36,6 +40,21 @@ class Settings(BaseSettings):
     # Observability
     sentry_dsn: str | None = None
     log_level: str = "INFO"
+
+    @model_validator(mode="after")
+    def validate_secrets(self) -> "Settings":
+        """Reject insecure or default secrets at startup."""
+        if self.jwt_secret.lower() in KNOWN_INSECURE_SECRETS:
+            raise ValueError(
+                "JWT_SECRET is set to a known insecure value. "
+                "Set a unique secret of 32+ characters."
+            )
+        if len(self.jwt_secret) < 32:
+            raise ValueError(
+                f"JWT_SECRET must be at least 32 characters (got {len(self.jwt_secret)}). "
+                f'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(48))"'
+            )
+        return self
 
 
 def get_settings() -> Settings:

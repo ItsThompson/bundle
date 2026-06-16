@@ -145,11 +145,15 @@ final class CaptureCoordinator {
                     status: response.status
                 )
             } catch {
-                print("[Bundle] ID replacement failed: \(error)")
+                print("[Bundle] ID replacement failed for \(artifactId): \(error.localizedDescription)")
             }
         } else {
             // Upload failed: reset upload_state so sync/retry can pick it up
-            try? localDatabase.setUploadState(artifactId: artifactId, state: "idle")
+            do {
+                try localDatabase.setUploadState(artifactId: artifactId, state: "idle")
+            } catch {
+                print("[Bundle] Failed to reset upload state for \(artifactId): \(error.localizedDescription)")
+            }
         }
     }
 

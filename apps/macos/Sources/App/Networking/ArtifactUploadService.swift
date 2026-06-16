@@ -20,15 +20,15 @@ struct ArtifactUploadResponse: Decodable {
 final class ArtifactUploadService {
     private let baseURL: String
     private let session: URLSession
-    private let tokenStore: TokenStore
+    private let tokenManager: TokenManager
 
     init(
         baseURL: String = APIClient.defaultBaseURL,
-        tokenStore: TokenStore = KeychainManager(),
+        tokenManager: TokenManager = TokenManager(),
         session: URLSession = .ephemeral
     ) {
         self.baseURL = baseURL
-        self.tokenStore = tokenStore
+        self.tokenManager = tokenManager
         self.session = session
     }
 
@@ -39,7 +39,7 @@ final class ArtifactUploadService {
         type: String,
         createdAt: Date
     ) async -> ArtifactUploadResponse? {
-        guard let token = tokenStore.getAccessToken() else {
+        guard let token = await tokenManager.getAccessToken() else {
             print("[Bundle] Upload skipped: not authenticated")
             return nil
         }
@@ -85,6 +85,16 @@ final class ArtifactUploadService {
                 return try decoder.decode(ArtifactUploadResponse.self, from: data)
             }
 
+            // Handle 401: refresh and retry once
+            if httpResponse.statusCode == 401 {
+                let refreshed = await tokenManager.refreshIfNeeded()
+                if refreshed {
+                    return await retryUploadArtifact(fileURL: fileURL, type: type, createdAt: createdAt)
+                }
+                print("[Bundle] Upload failed: token refresh failed")
+                return nil
+            }
+
             print("[Bundle] Upload failed: HTTP \(httpResponse.statusCode)")
             return nil
         } catch {
@@ -100,7 +110,7 @@ final class ArtifactUploadService {
         url: String,
         createdAt: Date
     ) async -> ArtifactUploadResponse? {
-        guard let token = tokenStore.getAccessToken() else {
+        guard let token = await tokenManager.getAccessToken() else {
             print("[Bundle] Upload skipped: not authenticated")
             return nil
         }
@@ -147,10 +157,123 @@ final class ArtifactUploadService {
                 return try decoder.decode(ArtifactUploadResponse.self, from: data)
             }
 
+            // Handle 401: refresh and retry once
+            if httpResponse.statusCode == 401 {
+                let refreshed = await tokenManager.refreshIfNeeded()
+                if refreshed {
+                    return await retryUploadLink(url: url, createdAt: createdAt)
+                }
+                print("[Bundle] Upload failed: token refresh failed")
+                return nil
+            }
+
             print("[Bundle] Upload failed: HTTP \(httpResponse.statusCode)")
             return nil
         } catch {
             print("[Bundle] Upload failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    // MARK: - Retry Helpers (after token refresh)
+
+    /// Retry artifact upload with fresh token (called only after successful refresh).
+    private func retryUploadArtifact(
+        fileURL: URL,
+        type: String,
+        createdAt: Date
+    ) async -> ArtifactUploadResponse? {
+        guard let token = await tokenManager.getAccessToken() else {
+            return nil
+        }
+
+        guard let url = URL(string: "\(baseURL)/api/v1/artifacts") else {
+            return nil
+        }
+
+        let boundary = UUID().uuidString
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
+        let isoFormatter = ISO8601DateFormatter()
+        let createdAtStr = isoFormatter.string(from: createdAt)
+
+        guard let fileData = try? Data(contentsOf: fileURL) else {
+            return nil
+        }
+
+        request.httpBody = buildMultipartBody(
+            boundary: boundary,
+            fileData: fileData,
+            fileName: fileURL.lastPathComponent,
+            type: type,
+            createdAt: createdAtStr
+        )
+
+        do {
+            let (data, response) = try await session.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  httpResponse.statusCode == 201 else {
+                print("[Bundle] Upload retry failed")
+                return nil
+            }
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            return try decoder.decode(ArtifactUploadResponse.self, from: data)
+        } catch {
+            print("[Bundle] Upload retry failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// Retry link upload with fresh token (called only after successful refresh).
+    private func retryUploadLink(
+        url: String,
+        createdAt: Date
+    ) async -> ArtifactUploadResponse? {
+        guard let token = await tokenManager.getAccessToken() else {
+            return nil
+        }
+
+        guard let endpoint = URL(string: "\(baseURL)/api/v1/artifacts") else {
+            return nil
+        }
+
+        let boundary = UUID().uuidString
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
+        let isoFormatter = ISO8601DateFormatter()
+        let createdAtStr = isoFormatter.string(from: createdAt)
+
+        let jsonObject: [String: String] = ["url": url]
+        guard let fileData = try? JSONSerialization.data(withJSONObject: jsonObject, options: [.sortedKeys]) else {
+            return nil
+        }
+
+        request.httpBody = buildLinkMultipartBody(
+            boundary: boundary,
+            fileData: fileData,
+            url: url,
+            createdAt: createdAtStr
+        )
+
+        do {
+            let (data, response) = try await session.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  httpResponse.statusCode == 201 else {
+                print("[Bundle] Link upload retry failed")
+                return nil
+            }
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            return try decoder.decode(ArtifactUploadResponse.self, from: data)
+        } catch {
+            print("[Bundle] Link upload retry failed: \(error.localizedDescription)")
             return nil
         }
     }

@@ -169,10 +169,11 @@ final class LocalDatabase {
 
     /// Replace a local artifact's ID with the backend ID after successful upload.
     /// This ensures the sync's upsert will merge rather than create a duplicate.
+    /// Handles SQLITE_CONSTRAINT: if newId already exists (sync beat us), deletes the old pending record.
     func replaceArtifactId(oldId: String, newId: String, status: String) throws {
         guard isOpen else { throw DatabaseError.notOpen }
 
-        let sql = "UPDATE artifacts SET id = ?, status = ?, synced_at = ? WHERE id = ?"
+        let sql = "UPDATE artifacts SET id = ?, status = ?, upload_state = 'uploaded', synced_at = ? WHERE id = ?"
         let syncedAt = ISO8601DateFormatter().string(from: Date())
 
         var stmt: OpaquePointer?
@@ -186,8 +187,36 @@ final class LocalDatabase {
         sqlite3_bind_text(stmt, 3, (syncedAt as NSString).utf8String, -1, nil)
         sqlite3_bind_text(stmt, 4, (oldId as NSString).utf8String, -1, nil)
 
+        let stepResult = sqlite3_step(stmt)
+        if stepResult == SQLITE_DONE {
+            return
+        }
+
+        // Check for UNIQUE constraint violation (newId already exists from sync)
+        if stepResult == SQLITE_CONSTRAINT {
+            try deleteArtifact(id: oldId)
+            print("[Bundle] Resolved ID conflict: deleted old pending \(oldId), keeping synced \(newId)")
+            return
+        }
+
+        throw LocalDatabaseError.updateFailed(lastError)
+    }
+
+    /// Delete an artifact by ID.
+    func deleteArtifact(id: String) throws {
+        guard isOpen else { throw DatabaseError.notOpen }
+
+        let sql = "DELETE FROM artifacts WHERE id = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw LocalDatabaseError.prepareFailed(lastError)
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_text(stmt, 1, (id as NSString).utf8String, -1, nil)
+
         guard sqlite3_step(stmt) == SQLITE_DONE else {
-            throw LocalDatabaseError.updateFailed(lastError)
+            throw LocalDatabaseError.execFailed(lastError)
         }
     }
 
@@ -330,6 +359,27 @@ final class LocalDatabase {
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw LocalDatabaseError.updateFailed(lastError)
         }
+    }
+
+    /// Get the upload state for an artifact by ID.
+    /// Returns nil if the artifact does not exist.
+    func getUploadState(for artifactId: String) throws -> String? {
+        guard isOpen else { throw DatabaseError.notOpen }
+
+        let sql = "SELECT upload_state FROM artifacts WHERE id = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw LocalDatabaseError.prepareFailed(lastError)
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_text(stmt, 1, (artifactId as NSString).utf8String, -1, nil)
+
+        guard sqlite3_step(stmt) == SQLITE_ROW else {
+            return nil
+        }
+
+        return columnText(stmt, 0)
     }
 
     // MARK: - Sync Operations

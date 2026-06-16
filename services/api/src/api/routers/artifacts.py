@@ -21,8 +21,9 @@ from fastapi import (
 from fastapi.responses import FileResponse
 from pydantic import ValidationError
 
-from api.dependencies import get_pool
+from api.dependencies import get_pool, get_rate_limiter
 from api.middleware.auth import CurrentUser, get_current_user
+from api.middleware.rate_limiter import RateLimitConfig, RateLimiter
 from api.models.artifact_responses import (
     ArtifactListResponse,
     ArtifactResponse,
@@ -35,13 +36,16 @@ from api.models.requests import ArtifactUploadParams
 from api.services import (
     artifact_repository,
     artifact_service,
-    processing_service,
+    quota_service,
     search_service,
     tag_repository,
 )
 
 router = APIRouter(prefix="/api/v1/artifacts", tags=["artifacts"])
 logger = structlog.get_logger("api.artifacts")
+
+SEARCH_RATE_CONFIG = RateLimitConfig(max_requests=60, window_seconds=60)
+RETRY_COOLDOWN_SECONDS = 300
 
 
 def _parse_type(s: str) -> ArtifactType:
@@ -95,6 +99,11 @@ async def upload_artifact(
         ) from exc
 
     content = await artifact_service.read_upload(file, artifact_type=artifact_type)
+
+    # Check storage quota before writing
+    async with pool.acquire() as conn:
+        await quota_service.check_storage_quota(conn, current_user.id, len(content))
+
     artifact = await artifact_service.create_artifact(
         pool=pool,
         settings=request.app.state.settings,
@@ -104,7 +113,11 @@ async def upload_artifact(
         content_text=params.content_text,
         created_at=parsed_ts,
     )
-    processing_service.notify(artifact["id"])
+
+    # Increment storage usage after successful upload
+    async with pool.acquire() as conn:
+        await quota_service.increment_storage(conn, current_user.id, len(content))
+
     logger.info(
         "artifact_uploaded",
         artifact_id=str(artifact["id"]),
@@ -125,8 +138,12 @@ async def search_artifacts(
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     pool: Annotated[asyncpg.Pool, Depends(get_pool)],
     request: Request,
+    limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
 ) -> SearchResponse:
     """Hybrid search across artifacts using BM25 + vector similarity."""
+    limiter.check(f"search:{current_user.id}", SEARCH_RATE_CONFIG)
+    limiter.record(f"search:{current_user.id}")
+
     embedding_provider = getattr(request.app.state, "embedding_provider", None)
     if embedding_provider is None:
         raise HTTPException(
@@ -223,7 +240,23 @@ async def retry_artifact(
     pool: Annotated[asyncpg.Pool, Depends(get_pool)],
 ) -> ArtifactResponse:
     """Retry processing for a failed artifact."""
+    # Check retry cooldown via updated_at in DB
     async with pool.acquire() as conn:
+        last_updated = await conn.fetchval(
+            "SELECT updated_at FROM artifacts WHERE id = $1 AND user_id = $2",
+            artifact_id,
+            current_user.id,
+        )
+        if last_updated is not None:
+            elapsed = (datetime.now(UTC) - last_updated).total_seconds()
+            if elapsed < RETRY_COOLDOWN_SECONDS:
+                remaining = int(RETRY_COOLDOWN_SECONDS - elapsed)
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail=f"Retry available in {remaining // 60} minutes",
+                    headers={"Retry-After": str(remaining)},
+                )
+
         row = await artifact_repository.retry_artifact(
             conn, artifact_id=artifact_id, user_id=current_user.id
         )
@@ -237,7 +270,6 @@ async def retry_artifact(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Artifact is not in failed state"
         )
-    processing_service.notify(row["id"])
     logger.info(
         "artifact_retry_requested",
         artifact_id=str(artifact_id),

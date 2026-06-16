@@ -189,7 +189,7 @@ final class ScreenshotCapture {
         dateFormatter.dateFormat = "yyyy/MM/dd"
         let dateStr = dateFormatter.string(from: now)
 
-        let baseDir = artifactsDirectory.appendingPathComponent(dateStr)
+        let baseDir = CaptureCoordinator.artifactsDirectory.appendingPathComponent(dateStr)
 
         // Ensure directory exists
         do {
@@ -263,12 +263,6 @@ final class ScreenshotCapture {
         return context.makeImage()
     }
 
-    // MARK: - Paths
-
-    private var artifactsDirectory: URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        return appSupport.appendingPathComponent("Bundle/artifacts")
-    }
 }
 
 // MARK: - Region Selection View

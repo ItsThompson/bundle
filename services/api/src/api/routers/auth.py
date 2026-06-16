@@ -1,369 +1,115 @@
-"""Auth router: register, login, refresh, logout, me, update email, change password."""
-
+"""Auth router: parse requests, call auth_service, format responses."""
 import time
 from collections import defaultdict
 from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
-
 import asyncpg
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-
-from api.config import Settings  # noqa: TC001
+from api.config import Settings
 from api.dependencies import get_pool
 from api.middleware.auth import CurrentUser, get_current_user
-from api.models.requests import (
-    ChangePasswordRequest,
-    LoginRequest,
-    RefreshRequest,
-    RegisterRequest,
-    UpdateEmailRequest,
-)
+from api.models.requests import (ChangePasswordRequest, LoginRequest, RefreshRequest, RegisterRequest, UpdateEmailRequest)
 from api.models.responses import AuthResponse, MessageResponse, TokenResponse, UserResponse
 from api.services.auth_service import (
-    PasswordValidationError,
-    TokenError,
-    decode_refresh_token,
-    generate_tokens,
-    hash_password,
-    validate_password_strength,
-    verify_password,
+    PasswordValidationError, TokenError, blacklist_token, change_password, decode_refresh_token,
+    generate_tokens, get_password_hash, hash_password, is_token_blacklisted, lookup_user_by_email,
+    register_user, update_user_email, validate_password_strength, verify_password,
 )
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 logger = structlog.get_logger("api.auth")
-
-# Rate limiting state: IP -> list of timestamps
 _login_attempts: dict[str, list[float]] = defaultdict(list)
-LOGIN_RATE_LIMIT = 10  # max attempts
-LOGIN_RATE_WINDOW = 60  # seconds
-
 
 def _check_rate_limit(ip: str) -> None:
-    """Check if an IP has exceeded the login rate limit.
-
-    Raises HTTPException 429 if the limit is exceeded.
-    """
     now = time.time()
-    # Clean old entries outside the window
-    _login_attempts[ip] = [t for t in _login_attempts[ip] if now - t < LOGIN_RATE_WINDOW]
+    _login_attempts[ip] = [t for t in _login_attempts[ip] if now - t < 60]
+    if len(_login_attempts[ip]) >= 10:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many login attempts. Please try again later.")
+    _login_attempts[ip].append(now)
 
-    if len(_login_attempts[ip]) >= LOGIN_RATE_LIMIT:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many login attempts. Please try again later.",
-        )
-
-
-def _record_login_attempt(ip: str) -> None:
-    """Record a login attempt for rate limiting."""
-    _login_attempts[ip].append(time.time())
-
+def _validate_pw(pw: str) -> None:
+    try: validate_password_strength(pw)
+    except PasswordValidationError as e: raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=e.message) from None
 
 @router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
-async def register(
-    body: RegisterRequest,
-    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
-    request: Request,
-) -> AuthResponse:
+async def register(body: RegisterRequest, pool: Annotated[asyncpg.Pool, Depends(get_pool)], request: Request) -> AuthResponse:
     """Create a new user account and return tokens."""
     settings: Settings = request.app.state.settings
-
-    try:
-        validate_password_strength(body.password)
-    except PasswordValidationError as e:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=e.message,
-        ) from None
-
-    password_hash = hash_password(body.password, cost=settings.bcrypt_cost)
-
+    _validate_pw(body.password)
     try:
         async with pool.acquire() as conn:
-            row = await conn.fetchrow(
-                """
-                INSERT INTO auth.users (email, password_hash)
-                VALUES ($1, $2)
-                RETURNING id, email, created_at, updated_at
-                """,
-                body.email,
-                password_hash,
-            )
+            row = await register_user(conn, email=body.email, password_hash=hash_password(body.password, cost=settings.bcrypt_cost))
     except asyncpg.UniqueViolationError:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Email already registered",
-        ) from None
-
-    user_id = str(row["id"])
-    access_token, refresh_token, _jti = generate_tokens(user_id, settings)
-
-    logger.info("user_registered", user_id=user_id, email=body.email)
-
-    return AuthResponse(
-        user=UserResponse(
-            id=row["id"],
-            email=row["email"],
-            created_at=row["created_at"],
-            updated_at=row["updated_at"],
-        ),
-        access_token=access_token,
-        refresh_token=refresh_token,
-    )
-
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered") from None
+    access_token, refresh_token, _ = generate_tokens(str(row["id"]), settings)
+    logger.info("user_registered", user_id=str(row["id"]))
+    return AuthResponse(user=UserResponse(id=row["id"], email=row["email"], created_at=row["created_at"], updated_at=row["updated_at"]), access_token=access_token, refresh_token=refresh_token)
 
 @router.post("/login", response_model=AuthResponse)
-async def login(
-    body: LoginRequest,
-    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
-    request: Request,
-) -> AuthResponse:
+async def login(body: LoginRequest, pool: Annotated[asyncpg.Pool, Depends(get_pool)], request: Request) -> AuthResponse:
     """Authenticate with email and password, return tokens."""
     settings: Settings = request.app.state.settings
-    client_ip = request.client.host if request.client else "unknown"
-
-    _check_rate_limit(client_ip)
-    _record_login_attempt(client_ip)
-
+    _check_rate_limit(request.client.host if request.client else "unknown")
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            """
-            SELECT id, email, password_hash, tokens_revoked_at, created_at, updated_at
-            FROM auth.users
-            WHERE email = $1
-            """,
-            body.email,
-        )
-
-    # Always return generic error to not reveal if email exists
+        row = await lookup_user_by_email(conn, email=body.email)
     if row is None or not verify_password(body.password, row["password_hash"]):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
-        )
-
-    user_id = str(row["id"])
-    access_token, refresh_token, _jti = generate_tokens(user_id, settings)
-
-    logger.info("user_logged_in", user_id=user_id)
-
-    return AuthResponse(
-        user=UserResponse(
-            id=row["id"],
-            email=row["email"],
-            created_at=row["created_at"],
-            updated_at=row["updated_at"],
-        ),
-        access_token=access_token,
-        refresh_token=refresh_token,
-    )
-
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    access_token, refresh_token, _ = generate_tokens(str(row["id"]), settings)
+    logger.info("user_logged_in", user_id=str(row["id"]))
+    return AuthResponse(user=UserResponse(id=row["id"], email=row["email"], created_at=row["created_at"], updated_at=row["updated_at"]), access_token=access_token, refresh_token=refresh_token)
 
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh(
-    body: RefreshRequest,
-    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
-    request: Request,
-) -> TokenResponse:
+async def refresh(body: RefreshRequest, pool: Annotated[asyncpg.Pool, Depends(get_pool)], request: Request) -> TokenResponse:
     """Rotate tokens: validate refresh token, blacklist it, issue new pair."""
     settings: Settings = request.app.state.settings
-
-    try:
-        payload = decode_refresh_token(body.refresh_token, settings)
-    except TokenError as e:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=e.message,
-        ) from None
-
-    jti = payload["jti"]
-    user_id = payload["sub"]
-    exp = payload["exp"]
-
+    try: payload = decode_refresh_token(body.refresh_token, settings)
+    except TokenError as e: raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=e.message) from None
+    jti, user_id, exp = UUID(payload["jti"]), payload["sub"], payload["exp"]
     async with pool.acquire() as conn:
-        # Check if token is already blacklisted
-        is_blacklisted = await conn.fetchval(
-            "SELECT EXISTS(SELECT 1 FROM auth.refresh_token_blacklist WHERE jti = $1)",
-            UUID(jti),
-        )
-        if is_blacklisted:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token has been revoked",
-            )
-
-        # Blacklist the old refresh token
-        await conn.execute(
-            """
-            INSERT INTO auth.refresh_token_blacklist (jti, user_id, expires_at)
-            VALUES ($1, $2, $3)
-            """,
-            UUID(jti),
-            UUID(user_id),
-            datetime.fromtimestamp(exp, tz=UTC),
-        )
-
-    # Issue new token pair
-    access_token, new_refresh_token, _new_jti = generate_tokens(user_id, settings)
-
-    logger.info("tokens_refreshed", user_id=user_id)
-
-    return TokenResponse(
-        access_token=access_token,
-        refresh_token=new_refresh_token,
-    )
-
+        if await is_token_blacklisted(conn, jti=jti):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has been revoked")
+        await blacklist_token(conn, jti=jti, user_id=UUID(user_id), expires_at=datetime.fromtimestamp(exp, tz=UTC))
+    access_token, new_refresh_token, _ = generate_tokens(user_id, settings)
+    return TokenResponse(access_token=access_token, refresh_token=new_refresh_token)
 
 @router.post("/logout", response_model=MessageResponse)
-async def logout(
-    body: RefreshRequest,
-    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
-    request: Request,
-) -> MessageResponse:
+async def logout(body: RefreshRequest, pool: Annotated[asyncpg.Pool, Depends(get_pool)], current_user: Annotated[CurrentUser, Depends(get_current_user)], request: Request) -> MessageResponse:
     """Blacklist the current refresh token."""
-    settings: Settings = request.app.state.settings
-
-    try:
-        payload = decode_refresh_token(body.refresh_token, settings)
-    except TokenError as e:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=e.message,
-        ) from None
-
-    jti = payload["jti"]
-    exp = payload["exp"]
-
+    try: payload = decode_refresh_token(body.refresh_token, request.app.state.settings)
+    except TokenError as e: raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=e.message) from None
     async with pool.acquire() as conn:
-        await conn.execute(
-            """
-            INSERT INTO auth.refresh_token_blacklist (jti, user_id, expires_at)
-            VALUES ($1, $2, $3)
-            ON CONFLICT (jti) DO NOTHING
-            """,
-            UUID(jti),
-            current_user.id,
-            datetime.fromtimestamp(exp, tz=UTC),
-        )
-
-    logger.info("user_logged_out", user_id=str(current_user.id))
-
+        await blacklist_token(conn, jti=UUID(payload["jti"]), user_id=current_user.id, expires_at=datetime.fromtimestamp(payload["exp"], tz=UTC))
     return MessageResponse(message="Logged out successfully")
 
-
 @router.get("/me", response_model=UserResponse)
-async def get_me(
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
-) -> UserResponse:
+async def get_me(current_user: Annotated[CurrentUser, Depends(get_current_user)]) -> UserResponse:
     """Get current user profile."""
-    return UserResponse(
-        id=current_user.id,
-        email=current_user.email,
-        created_at=current_user.created_at,
-        updated_at=current_user.updated_at,
-    )
-
+    return UserResponse(id=current_user.id, email=current_user.email, created_at=current_user.created_at, updated_at=current_user.updated_at)
 
 @router.put("/me", response_model=UserResponse)
-async def update_email(
-    body: UpdateEmailRequest,
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
-    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
-) -> UserResponse:
+async def update_email_endpoint(body: UpdateEmailRequest, current_user: Annotated[CurrentUser, Depends(get_current_user)], pool: Annotated[asyncpg.Pool, Depends(get_pool)]) -> UserResponse:
     """Update current user's email."""
     try:
         async with pool.acquire() as conn:
-            row = await conn.fetchrow(
-                """
-                UPDATE auth.users
-                SET email = $2, updated_at = now()
-                WHERE id = $1
-                RETURNING id, email, created_at, updated_at
-                """,
-                current_user.id,
-                body.email,
-            )
+            row = await update_user_email(conn, user_id=current_user.id, new_email=body.email)
     except asyncpg.UniqueViolationError:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Email already in use",
-        ) from None
-
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already in use") from None
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-
-    logger.info("email_updated", user_id=str(current_user.id), new_email=body.email)
-
-    return UserResponse(
-        id=row["id"],
-        email=row["email"],
-        created_at=row["created_at"],
-        updated_at=row["updated_at"],
-    )
-
+    return UserResponse(id=row["id"], email=row["email"], created_at=row["created_at"], updated_at=row["updated_at"])
 
 @router.post("/me/password", response_model=AuthResponse)
-async def change_password(
-    body: ChangePasswordRequest,
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
-    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
-    request: Request,
-) -> AuthResponse:
-    """Change password, revoke all existing sessions, and issue new tokens for current device."""
+async def change_password_endpoint(body: ChangePasswordRequest, current_user: Annotated[CurrentUser, Depends(get_current_user)], pool: Annotated[asyncpg.Pool, Depends(get_pool)], request: Request) -> AuthResponse:
+    """Change password, revoke all sessions, issue new tokens."""
     settings: Settings = request.app.state.settings
-
-    try:
-        validate_password_strength(body.new_password)
-    except PasswordValidationError as e:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=e.message,
-        ) from None
-
-    # Verify current password
+    _validate_pw(body.new_password)
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT password_hash FROM auth.users WHERE id = $1",
-            current_user.id,
-        )
-
-    if row is None or not verify_password(body.current_password, row["password_hash"]):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Current password is incorrect",
-        )
-
-    # Hash new password and update (sets tokens_revoked_at = now())
-    new_hash = hash_password(body.new_password, cost=settings.bcrypt_cost)
-
+        pw_hash = await get_password_hash(conn, user_id=current_user.id)
+    if pw_hash is None or not verify_password(body.current_password, pw_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Current password is incorrect")
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            """
-            UPDATE auth.users
-            SET password_hash = $2, tokens_revoked_at = now(), updated_at = now()
-            WHERE id = $1
-            RETURNING id, email, created_at, updated_at
-            """,
-            current_user.id,
-            new_hash,
-        )
-
-    # Issue fresh tokens so the current device stays logged in
-    user_id = str(current_user.id)
-    access_token, refresh_token, _jti = generate_tokens(user_id, settings)
-
-    logger.info("password_changed", user_id=user_id)
-
-    return AuthResponse(
-        user=UserResponse(
-            id=row["id"],
-            email=row["email"],
-            created_at=row["created_at"],
-            updated_at=row["updated_at"],
-        ),
-        access_token=access_token,
-        refresh_token=refresh_token,
-    )
+        row = await change_password(conn, user_id=current_user.id, new_password_hash=hash_password(body.new_password, cost=settings.bcrypt_cost))
+    access_token, refresh_token, _ = generate_tokens(str(current_user.id), settings)
+    return AuthResponse(user=UserResponse(id=row["id"], email=row["email"], created_at=row["created_at"], updated_at=row["updated_at"]), access_token=access_token, refresh_token=refresh_token)

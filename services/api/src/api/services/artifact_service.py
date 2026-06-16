@@ -7,9 +7,11 @@ from pathlib import Path
 import asyncpg
 import structlog
 from fastapi import HTTPException, UploadFile, status
+from pydantic import ValidationError
 
 from api.config import Settings
 from api.models.domain import ARTIFACT_EXTENSIONS, ArtifactType
+from api.models.requests import ArtifactUploadParams
 from api.services import artifact_repository
 
 logger = structlog.get_logger("api.artifact_service")
@@ -69,12 +71,19 @@ async def create_artifact(
     created_at: datetime,
     content_text: str | None = None,
 ) -> dict:
-    """Save artifact file to disk and create DB row.
+    """Validate params, save artifact file to disk, and create DB row.
 
     For notes, the file content is stored in content_text for full-text search.
     For links, content_text is the URL string passed explicitly.
     Returns the artifact record as a dict.
     """
+    # Validate upload params (URL scheme/length for links, content_text length)
+    try:
+        params = ArtifactUploadParams(type=artifact_type, content_text=content_text, created_at=created_at)
+    except ValidationError as exc:
+        msg = exc.errors()[0].get("msg", str(exc)) if exc.errors() else str(exc)
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=msg) from exc
+    content_text = params.content_text
     artifact_id = uuid.uuid4()
     date_str = created_at.strftime("%Y/%m/%d")
     file_ext = ARTIFACT_EXTENSIONS[artifact_type]

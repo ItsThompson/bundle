@@ -71,9 +71,16 @@ struct CaptureCoordinatorTests {
 
     @Test("Coordinator rejects capture when database is not open")
     func rejectsCaptureWhenDatabaseNotOpen() async throws {
-        let db = LocalDatabase(dbPath: FileManager.default.temporaryDirectory.appendingPathComponent("never_opened_\(UUID().uuidString).db"))
+        let tempDir = FileManager.default.temporaryDirectory
+        let dbPath = tempDir.appendingPathComponent("test_not_open_\(UUID().uuidString).db")
+        let db = LocalDatabase(dbPath: dbPath)
+        defer { try? FileManager.default.removeItem(at: dbPath) }
         // Do NOT open the database
-        let uploadService = ArtifactUploadService(tokenManager: TokenManager())
+        #expect(db.isOpen == false)
+
+        let uploadService = ArtifactUploadService(
+            tokenManager: TokenManager(tokenStore: MockTokenStore())
+        )
         let thumbnail = PostCaptureThumbnail()
 
         let coordinator = CaptureCoordinator(
@@ -82,12 +89,25 @@ struct CaptureCoordinatorTests {
             postCaptureThumbnail: thumbnail
         )
 
-        // Verify isOpen is false
-        #expect(db.isOpen == false)
+        // Replace alert with a non-blocking callback that records the call
+        var alertShown = false
+        coordinator.onDatabaseUnavailable = { alertShown = true }
 
-        // The coordinator should check isOpen and show alert, but since we can't
-        // intercept NSAlert in a test, we verify the state doesn't change
-        // by confirming no artifacts were inserted (db is closed, so no insert possible)
+        // Call handle: coordinator should guard on isOpen, call onDatabaseUnavailable, and not insert
+        await coordinator.handle(.link(url: "https://example.com", createdAt: Date()))
+
+        // Verify the guard fired
+        #expect(alertShown == true)
+
+        // Verify no artifact was persisted
+        let verifyDb = LocalDatabase(dbPath: dbPath)
+        defer { verifyDb.close() }
+        let fileExists = FileManager.default.fileExists(atPath: dbPath.path)
+        if fileExists {
+            try verifyDb.open()
+            let count = try verifyDb.getArtifactCount()
+            #expect(count == 0)
+        }
     }
 
     // MARK: - Screenshot Capture Flow

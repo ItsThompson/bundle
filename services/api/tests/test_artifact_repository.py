@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -38,8 +38,9 @@ class TestCreateArtifact:
     ) -> None:
         """create_artifact inserts with correct params and returns row as dict."""
         now = datetime(2026, 6, 10, 12, 0, 0, tzinfo=UTC)
+        artifact_id = uuid.uuid4()
         expected_row = {
-            "id": uuid.uuid4(),
+            "id": artifact_id,
             "user_id": user_id,
             "type": "screenshot",
             "storage_path": "some/path.png",
@@ -54,6 +55,7 @@ class TestCreateArtifact:
 
         result = await create_artifact(
             mock_conn,
+            artifact_id=artifact_id,
             user_id=user_id,
             artifact_type=ArtifactType.SCREENSHOT,
             storage_path="some/path.png",
@@ -66,7 +68,8 @@ class TestCreateArtifact:
         call_args = mock_conn.fetchrow.call_args[0]
         # Verify SQL contains INSERT
         assert "INSERT INTO artifacts" in call_args[0]
-        # Verify user_id, type value, status value are passed
+        # Verify artifact_id, user_id, type value, status value are passed
+        assert call_args[1] == artifact_id
         assert call_args[2] == user_id
         assert call_args[3] == "screenshot"
         assert call_args[6] == "pending"
@@ -81,6 +84,7 @@ class TestCreateArtifact:
 
         await create_artifact(
             mock_conn,
+            artifact_id=uuid.uuid4(),
             user_id=user_id,
             artifact_type=ArtifactType.NOTE,
             storage_path="path/note.md",
@@ -93,28 +97,26 @@ class TestCreateArtifact:
         assert call_args[6] == "pending"  # ProcessingStatus.PENDING.value
 
     @pytest.mark.asyncio
-    async def test_generates_uuid_for_artifact_id(
+    async def test_passes_artifact_id_to_sql(
         self, mock_conn: AsyncMock, user_id: uuid.UUID
     ) -> None:
-        """create_artifact generates a new UUID for the artifact."""
+        """create_artifact passes the provided artifact_id to the INSERT."""
         now = datetime(2026, 6, 10, 12, 0, 0, tzinfo=UTC)
-        mock_conn.fetchrow.return_value = {"id": uuid.uuid4()}
+        fixed_id = uuid.uuid4()
+        mock_conn.fetchrow.return_value = {"id": fixed_id}
 
-        with patch("api.services.artifact_repository.uuid.uuid4") as mock_uuid:
-            fixed_id = uuid.uuid4()
-            mock_uuid.return_value = fixed_id
+        await create_artifact(
+            mock_conn,
+            artifact_id=fixed_id,
+            user_id=user_id,
+            artifact_type=ArtifactType.LINK,
+            storage_path="path/link.json",
+            content_text="https://example.com",
+            created_at=now,
+        )
 
-            await create_artifact(
-                mock_conn,
-                user_id=user_id,
-                artifact_type=ArtifactType.LINK,
-                storage_path="path/link.json",
-                content_text="https://example.com",
-                created_at=now,
-            )
-
-            call_args = mock_conn.fetchrow.call_args[0]
-            assert call_args[1] == fixed_id
+        call_args = mock_conn.fetchrow.call_args[0]
+        assert call_args[1] == fixed_id
 
 
 class TestListArtifacts:

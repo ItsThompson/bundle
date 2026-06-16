@@ -6,6 +6,7 @@ import asyncpg
 import structlog
 
 from api.processing.nim_embedding_provider import NimEmbeddingProvider
+from api.services.tag_repository import fetch_tags_for_artifacts
 
 logger = structlog.get_logger("api.search_service")
 
@@ -82,26 +83,9 @@ async def hybrid_search(
             MAX_RESULTS,
         )
 
-        # Fetch tags for all result artifacts in one query
+        # Fetch tags for all result artifacts
         artifact_ids = [row["id"] for row in rows]
-        tag_rows = (
-            await conn.fetch(
-                """
-                SELECT artifact_id, name
-                FROM artifact_tags
-                WHERE artifact_id = ANY($1::uuid[])
-                """,
-                artifact_ids,
-            )
-            if artifact_ids
-            else []
-        )
-
-    # Group tags by artifact ID
-    tags_by_artifact: dict[uuid.UUID, list[str]] = {}
-    for tag_row in tag_rows:
-        aid = tag_row["artifact_id"]
-        tags_by_artifact.setdefault(aid, []).append(tag_row["name"])
+        tags_by_artifact = await fetch_tags_for_artifacts(conn, artifact_ids)
 
     results = [
         {

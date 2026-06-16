@@ -146,7 +146,7 @@ final class NoteEditor {
         dateFormatter.dateFormat = "yyyy/MM/dd"
         let dateStr = dateFormatter.string(from: now)
 
-        let baseDir = artifactsDirectory.appendingPathComponent(dateStr)
+        let baseDir = CaptureCoordinator.artifactsDirectory.appendingPathComponent(dateStr)
 
         do {
             try FileManager.default.createDirectory(at: baseDir, withIntermediateDirectories: true)
@@ -172,10 +172,6 @@ final class NoteEditor {
         )
     }
 
-    private var artifactsDirectory: URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        return appSupport.appendingPathComponent("Bundle/artifacts")
-    }
 }
 
 // MARK: - Note Editor SwiftUI View

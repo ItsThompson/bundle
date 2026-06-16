@@ -14,6 +14,7 @@ logger = structlog.get_logger("api.artifact_repository")
 async def create_artifact(
     conn: asyncpg.Connection,
     *,
+    artifact_id: uuid.UUID,
     user_id: uuid.UUID,
     artifact_type: ArtifactType,
     storage_path: str,
@@ -21,7 +22,6 @@ async def create_artifact(
     created_at: datetime,
 ) -> dict:
     """Insert a new artifact row. Returns the created record."""
-    artifact_id = uuid.uuid4()
     row = await conn.fetchrow(
         """
         INSERT INTO artifacts (id, user_id, type, storage_path, content_text, status, created_at, updated_at)

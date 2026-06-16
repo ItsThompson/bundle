@@ -16,6 +16,25 @@ final class CaptureCoordinator {
         return appSupport.appendingPathComponent("Bundle/artifacts")
     }()
 
+    /// Called when a capture is rejected due to database being unavailable.
+    /// Default shows an NSAlert; override in tests to avoid blocking.
+    var onDatabaseUnavailable: () -> Void = {
+        let alert = NSAlert()
+        alert.messageText = "Cannot Capture"
+        alert.informativeText = "Local database is not available. Please restart Bundle."
+        alert.alertStyle = .warning
+        alert.runModal()
+    }
+
+    /// Called when a capture insert fails.
+    var onCaptureError: (Error) -> Void = { error in
+        let alert = NSAlert()
+        alert.messageText = "Capture Failed"
+        alert.informativeText = error.localizedDescription
+        alert.alertStyle = .warning
+        alert.runModal()
+    }
+
     init(
         localDatabase: LocalDatabase,
         uploadService: ArtifactUploadService,
@@ -29,7 +48,7 @@ final class CaptureCoordinator {
     /// Handle any capture result: persist, show thumbnail, upload.
     func handle(_ result: CaptureResult) async {
         guard localDatabase.isOpen else {
-            showDatabaseUnavailableAlert()
+            onDatabaseUnavailable()
             return
         }
 
@@ -38,7 +57,7 @@ final class CaptureCoordinator {
         do {
             try insertLocally(result, artifactId: artifactId)
         } catch {
-            showCaptureError(error)
+            onCaptureError(error)
             return
         }
 
@@ -147,18 +166,10 @@ final class CaptureCoordinator {
     }
 
     private func showDatabaseUnavailableAlert() {
-        let alert = NSAlert()
-        alert.messageText = "Cannot Capture"
-        alert.informativeText = "Local database is not available. Please restart Bundle."
-        alert.alertStyle = .warning
-        alert.runModal()
+        onDatabaseUnavailable()
     }
 
     private func showCaptureError(_ error: Error) {
-        let alert = NSAlert()
-        alert.messageText = "Capture Failed"
-        alert.informativeText = error.localizedDescription
-        alert.alertStyle = .warning
-        alert.runModal()
+        onCaptureError(error)
     }
 }

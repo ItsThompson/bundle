@@ -401,6 +401,8 @@ final class LocalDatabase {
 
     /// Set the last sync timestamp in sync_state table.
     func setLastSyncTimestamp(_ date: Date) throws {
+        guard isOpen else { throw DatabaseError.notOpen }
+
         let sql = """
             INSERT INTO sync_state (key, value) VALUES ('last_sync_timestamp', ?)
             ON CONFLICT(key) DO UPDATE SET value = excluded.value

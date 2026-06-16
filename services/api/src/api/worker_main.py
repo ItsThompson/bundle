@@ -1,6 +1,7 @@
 """Standalone worker entrypoint: processes artifacts via LISTEN/NOTIFY + polling."""
 
 import asyncio
+import contextlib
 import signal
 import sys
 
@@ -143,10 +144,8 @@ async def _listen_loop(
             delay = min(delay * 2, RECONNECT_MAX_DELAY)
         finally:
             if conn is not None:
-                try:
+                with contextlib.suppress(Exception):
                     await conn.close()
-                except Exception:
-                    pass
 
 
 def main() -> None:

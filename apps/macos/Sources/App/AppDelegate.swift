@@ -10,9 +10,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let linkInput = LinkInput()
     private let postCaptureThumbnail = PostCaptureThumbnail()
     private let localDatabase = LocalDatabase()
-    private let artifactUploadService = ArtifactUploadService()
+    private let tokenManager = TokenManager()
+    private lazy var artifactUploadService = ArtifactUploadService(tokenManager: tokenManager)
 
-    let authService = AuthService()
+    lazy var authService = AuthService(apiClient: APIClient(tokenManager: tokenManager), tokenManager: tokenManager)
     let hotkeyManager = HotkeyManager()
 
     func applicationDidFinishLaunching(_ notification: Notification) {

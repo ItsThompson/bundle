@@ -134,7 +134,7 @@ class TestArtifactList:
         client.post(
             "/api/v1/artifacts",
             data={"type": "screenshot", "created_at": "2026-06-09T10:00:00Z"},
-            files={"file": ("older.png", b"\x89PNG" + b"\x00" * 10, "image/png")},
+            files={"file": ("older.png", b"\x89PNG\r\n\x1a\n" + b"\x00" * 10, "image/png")},
             headers=auth_headers,
         )
         client.post(
@@ -166,7 +166,7 @@ class TestArtifactList:
             client.post(
                 "/api/v1/artifacts",
                 data={"type": "screenshot", "created_at": f"2026-06-1{i}T10:00:00Z"},
-                files={"file": (f"shot{i}.png", b"\x89PNG" + bytes([i]) * 10, "image/png")},
+                files={"file": (f"shot{i}.png", b"\x89PNG\r\n\x1a\n" + bytes([i]) * 10, "image/png")},
                 headers=auth_headers,
             )
 
@@ -198,7 +198,7 @@ class TestArtifactList:
         resp = client.post(
             "/api/v1/artifacts",
             data={"type": "screenshot", "created_at": "2026-06-10T10:00:00Z"},
-            files={"file": ("shot.png", b"\x89PNG" + b"\x00" * 10, "image/png")},
+            files={"file": ("shot.png", b"\x89PNG\r\n\x1a\n" + b"\x00" * 10, "image/png")},
             headers=auth_headers,
         )
         artifact_id = resp.json()["id"]
@@ -374,7 +374,7 @@ class TestNoteUpload:
         response = client.post(
             "/api/v1/artifacts",
             data={"type": "screenshot", "created_at": "2026-06-10T12:00:00Z"},
-            files={"file": ("shot.png", b"\x89PNG" + b"\x00" * 50, "image/png")},
+            files={"file": ("shot.png", b"\x89PNG\r\n\x1a\n" + b"\x00" * 50, "image/png")},
             headers=auth_headers,
         )
 

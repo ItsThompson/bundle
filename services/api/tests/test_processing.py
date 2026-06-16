@@ -391,6 +391,10 @@ class TestProcessingWorker:
         mock_embedding_provider: AsyncMock,
     ) -> None:
         """Link processing fetches URL content and tags the text."""
+        import httpx
+
+        from api.processing.safe_url_fetcher import SafeURLFetcher
+
         artifact = {
             "id": uuid.uuid4(),
             "type": "link",
@@ -401,18 +405,21 @@ class TestProcessingWorker:
         mock_record = MagicMock()
         mock_record.__getitem__ = lambda self, key: artifact[key]
 
-        with patch("api.processing.worker.httpx.AsyncClient") as mock_client_cls:
-            mock_response = MagicMock()
-            mock_response.text = "<html><body><p>Article content here</p></body></html>"
-            mock_response.headers = {"content-type": "text/html"}
-            mock_response.raise_for_status = MagicMock()
+        # Inject a mock transport into the worker's url_fetcher
+        def mock_handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                content=b"<html><body><p>Article content here</p></body></html>",
+                headers={"content-type": "text/html"},
+            )
 
-            mock_client = AsyncMock()
-            mock_client.get.return_value = mock_response
-            mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+        def public_resolver(hostname, port, family, socktype):
+            return [(family, socktype, 0, "", ("93.184.216.34", 0))]
 
-            tags, embedding = await worker._generate_tags_and_embedding(mock_record)
+        transport = httpx.MockTransport(mock_handler)
+        worker.url_fetcher = SafeURLFetcher(resolver=public_resolver, transport=transport)
+
+        tags, embedding = await worker._generate_tags_and_embedding(mock_record)
 
         assert tags == ["tag-one", "tag-two", "tag-three"]
         # Verify the text was stripped of HTML

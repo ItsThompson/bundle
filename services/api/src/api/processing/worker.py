@@ -16,6 +16,7 @@ from api.config import Settings
 from api.models.domain import ArtifactType, ProcessingStatus
 from api.processing.embedder import Embedder
 from api.processing.image_utils import resize_for_vision
+from api.processing.safe_url_fetcher import FetchResult, SafeURLFetcher, SSRFError
 from api.processing.tagger import Tagger, TagParseError
 
 logger = structlog.get_logger("api.processing.worker")
@@ -37,11 +38,13 @@ class ProcessingWorker:
         settings: Settings,
         tagger: Tagger,
         embedder: Embedder,
+        url_fetcher: SafeURLFetcher | None = None,
     ) -> None:
         self.pool = pool
         self.settings = settings
         self.tagger = tagger
         self.embedder = embedder
+        self.url_fetcher = url_fetcher or SafeURLFetcher()
         self.event = asyncio.Event()
         self._task: asyncio.Task | None = None
 
@@ -194,17 +197,32 @@ class ProcessingWorker:
         return tags, embedding
 
     async def _process_link(self, artifact: asyncpg.Record) -> tuple[list[str], list[float]]:
-        """Process link: fetch URL content, tag it; fallback to URL-only tagging."""
+        """Process link: fetch URL content safely, tag it; fallback to URL-only tagging."""
         url = artifact["content_text"] or ""
 
         if not url.strip():
             raise ValueError("Link artifact has no URL in content_text")
 
         try:
-            page_content = await self._fetch_link_content(url)
-            truncated = page_content[:LINK_CONTENT_MAX_CHARS]
+            result: FetchResult = await self.url_fetcher.fetch(url)
+            content_type = result.content_type
+            text = result.content.decode("utf-8", errors="replace")
+
+            # Strip HTML tags if content is HTML
+            if "html" in content_type:
+                text = self._strip_html(text)
+
+            truncated = text.strip()[:LINK_CONTENT_MAX_CHARS]
             tags = await self.tagger.tag_text(truncated)
             embedding = await self.embedder.embed(truncated)
+        except SSRFError as exc:
+            logger.warning(
+                "link_ssrf_blocked",
+                url=url,
+                error=str(exc),
+            )
+            tags = await self.tagger.tag_url_only(url)
+            embedding = await self.embedder.embed(url)
         except (httpx.HTTPError, httpx.TimeoutException) as exc:
             logger.warning(
                 "link_fetch_failed",
@@ -217,15 +235,11 @@ class ProcessingWorker:
         return tags, embedding
 
     async def _fetch_link_content(self, url: str) -> str:
-        """Fetch URL content, strip HTML, return plain text."""
-        async with httpx.AsyncClient(timeout=LINK_FETCH_TIMEOUT) as client:
-            response = await client.get(url, follow_redirects=True)
-            response.raise_for_status()
+        """Fetch URL content via SafeURLFetcher, strip HTML, return plain text."""
+        result = await self.url_fetcher.fetch(url)
+        content_type = result.content_type
+        text = result.content.decode("utf-8", errors="replace")
 
-        content_type = response.headers.get("content-type", "")
-        text = response.text
-
-        # Strip HTML tags if content is HTML
         if "html" in content_type:
             text = self._strip_html(text)
 

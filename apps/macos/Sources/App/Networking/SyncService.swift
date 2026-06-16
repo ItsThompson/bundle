@@ -171,9 +171,19 @@ final class SyncService: ObservableObject {
     // MARK: - Local Database Operations
 
     /// Insert or update an artifact in local SQLite from a sync response.
+    /// Skips artifacts currently being uploaded to prevent the upload/sync race.
     private func upsertArtifact(_ item: SyncArtifactResponse) throws {
+        let artifactId = item.id.uuidString
+
+        // Check if this artifact is currently being uploaded: skip to prevent race
+        let uploadState = try localDatabase.getUploadState(for: artifactId)
+        if uploadState == "uploading" {
+            print("[Bundle] Sync skip: artifact \(artifactId) is currently uploading")
+            return
+        }
+
         try localDatabase.upsertArtifactFromSync(
-            id: item.id.uuidString,
+            id: artifactId,
             type: item.type,
             contentText: item.contentText,
             status: item.status,
@@ -183,7 +193,7 @@ final class SyncService: ObservableObject {
 
         // Update tags for this artifact
         if !item.tags.isEmpty {
-            try localDatabase.upsertTags(artifactId: item.id.uuidString, tags: item.tags)
+            try localDatabase.upsertTags(artifactId: artifactId, tags: item.tags)
         }
     }
 
@@ -238,12 +248,16 @@ final class SyncService: ObservableObject {
             if let response = response {
                 // Replace local ID with backend ID so sync won't create a duplicate
                 let backendId = response.id.uuidString
-                try? localDatabase.replaceArtifactId(
-                    oldId: artifact.id,
-                    newId: backendId,
-                    status: response.status
-                )
-                print("[Bundle] Retry upload succeeded: \(artifact.id) → \(backendId) (\(response.status))")
+                do {
+                    try localDatabase.replaceArtifactId(
+                        oldId: artifact.id,
+                        newId: backendId,
+                        status: response.status
+                    )
+                    print("[Bundle] Retry upload succeeded: \(artifact.id) → \(backendId) (\(response.status))")
+                } catch {
+                    print("[Bundle] Retry ID replacement failed for \(artifact.id): \(error.localizedDescription)")
+                }
             }
         }
     }

@@ -1,6 +1,4 @@
 """Auth router: parse requests, call auth_service, format responses."""
-import time
-from collections import defaultdict
 from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
@@ -8,39 +6,41 @@ import asyncpg
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from api.config import Settings
-from api.dependencies import get_pool
+from api.dependencies import get_pool, get_rate_limiter
 from api.middleware.auth import CurrentUser, get_current_user
+from api.middleware.rate_limiter import RateLimitConfig, RateLimiter
 from api.models.requests import (ChangePasswordRequest, LoginRequest, RefreshRequest, RegisterRequest, UpdateEmailRequest)
 from api.models.responses import AuthResponse, MessageResponse, TokenResponse, UserResponse
+from api.services import quota_service
 from api.services.auth_service import (
     PasswordValidationError, TokenError, blacklist_token, change_password, decode_refresh_token,
     generate_tokens, get_password_hash, hash_password, is_token_blacklisted, lookup_user_by_email,
-    register_user, update_user_email, validate_password_strength, verify_password,
+    register_user, update_user_email, validate_password_strength, validate_token_not_revoked,
+    verify_password,
 )
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 logger = structlog.get_logger("api.auth")
-_login_attempts: dict[str, list[float]] = defaultdict(list)
 
-def _check_rate_limit(ip: str) -> None:
-    now = time.time()
-    _login_attempts[ip] = [t for t in _login_attempts[ip] if now - t < 60]
-    if len(_login_attempts[ip]) >= 10:
-        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many login attempts. Please try again later.")
-    _login_attempts[ip].append(now)
+LOGIN_RATE_CONFIG = RateLimitConfig(max_requests=10, window_seconds=60)
+REGISTER_RATE_CONFIG = RateLimitConfig(max_requests=3, window_seconds=3600)
 
 def _validate_pw(pw: str) -> None:
     try: validate_password_strength(pw)
     except PasswordValidationError as e: raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=e.message) from None
 
 @router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
-async def register(body: RegisterRequest, pool: Annotated[asyncpg.Pool, Depends(get_pool)], request: Request) -> AuthResponse:
+async def register(body: RegisterRequest, pool: Annotated[asyncpg.Pool, Depends(get_pool)], request: Request, limiter: Annotated[RateLimiter, Depends(get_rate_limiter)]) -> AuthResponse:
     """Create a new user account and return tokens."""
     settings: Settings = request.app.state.settings
+    ip = request.client.host if request.client else "unknown"
+    limiter.check(f"register:{ip}", REGISTER_RATE_CONFIG)
+    limiter.record(f"register:{ip}")
     _validate_pw(body.password)
     try:
         async with pool.acquire() as conn:
             row = await register_user(conn, email=body.email, password_hash=hash_password(body.password, cost=settings.bcrypt_cost))
+            await quota_service.create_quota_row(conn, user_id=row["id"])
     except asyncpg.UniqueViolationError:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered") from None
     access_token, refresh_token, _ = generate_tokens(str(row["id"]), settings)
@@ -48,10 +48,12 @@ async def register(body: RegisterRequest, pool: Annotated[asyncpg.Pool, Depends(
     return AuthResponse(user=UserResponse(id=row["id"], email=row["email"], created_at=row["created_at"], updated_at=row["updated_at"]), access_token=access_token, refresh_token=refresh_token)
 
 @router.post("/login", response_model=AuthResponse)
-async def login(body: LoginRequest, pool: Annotated[asyncpg.Pool, Depends(get_pool)], request: Request) -> AuthResponse:
+async def login(body: LoginRequest, pool: Annotated[asyncpg.Pool, Depends(get_pool)], request: Request, limiter: Annotated[RateLimiter, Depends(get_rate_limiter)]) -> AuthResponse:
     """Authenticate with email and password, return tokens."""
     settings: Settings = request.app.state.settings
-    _check_rate_limit(request.client.host if request.client else "unknown")
+    ip = request.client.host if request.client else "unknown"
+    limiter.check(f"login:{ip}", LOGIN_RATE_CONFIG)
+    limiter.record(f"login:{ip}")
     async with pool.acquire() as conn:
         row = await lookup_user_by_email(conn, email=body.email)
     if row is None or not verify_password(body.password, row["password_hash"]):
@@ -70,6 +72,10 @@ async def refresh(body: RefreshRequest, pool: Annotated[asyncpg.Pool, Depends(ge
     async with pool.acquire() as conn:
         if await is_token_blacklisted(conn, jti=jti):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has been revoked")
+        try:
+            await validate_token_not_revoked(conn, user_id, payload["iat"])
+        except TokenError as e:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=e.message) from None
         await blacklist_token(conn, jti=jti, user_id=UUID(user_id), expires_at=datetime.fromtimestamp(exp, tz=UTC))
     access_token, new_refresh_token, _ = generate_tokens(user_id, settings)
     return TokenResponse(access_token=access_token, refresh_token=new_refresh_token)

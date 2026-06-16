@@ -131,6 +131,14 @@ def _setup_test_db() -> Generator[None, None, None]:
                 ON artifact_embeddings USING hnsw (embedding vector_cosine_ops)
                 WITH (m = 16, ef_construction = 64)
             """)
+            # User quotas table for storage enforcement
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS public.user_quotas (
+                    user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+                    storage_bytes_used BIGINT NOT NULL DEFAULT 0,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+            """)
         finally:
             await conn.close()
 
@@ -141,10 +149,10 @@ def _setup_test_db() -> Generator[None, None, None]:
 @pytest.fixture(autouse=True)
 def _clean_tables(_setup_test_db: None) -> Generator[None, None, None]:
     """Clean all auth tables and rate limit state after each test."""
-    # Clear rate limit state before each test
-    from api.routers.auth import _login_attempts
+    # Clear rate limiter state before each test
+    from api.dependencies import _rate_limiter
 
-    _login_attempts.clear()
+    _rate_limiter._attempts.clear()
     yield
 
     async def cleanup() -> None:
@@ -153,6 +161,7 @@ def _clean_tables(_setup_test_db: None) -> Generator[None, None, None]:
             await conn.execute("DELETE FROM public.artifact_embeddings")
             await conn.execute("DELETE FROM public.artifact_tags")
             await conn.execute("DELETE FROM public.artifacts")
+            await conn.execute("DELETE FROM public.user_quotas")
             await conn.execute("DELETE FROM auth.refresh_token_blacklist")
             await conn.execute("DELETE FROM auth.users")
         finally:

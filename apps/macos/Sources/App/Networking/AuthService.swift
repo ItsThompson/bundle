@@ -10,18 +10,18 @@ final class AuthService: ObservableObject {
     @Published var errorMessage: String?
 
     private let apiClient: APIClient
-    private let tokenStore: TokenStore
+    private let tokenManager: TokenManager
 
-    init(apiClient: APIClient = APIClient(), tokenStore: TokenStore = KeychainManager()) {
+    init(apiClient: APIClient = APIClient(), tokenManager: TokenManager = TokenManager()) {
         self.apiClient = apiClient
-        self.tokenStore = tokenStore
+        self.tokenManager = tokenManager
     }
 
     // MARK: - Session Restoration
 
     /// Attempt to restore a session from stored tokens by validating with /me.
     func restoreSession() async {
-        guard tokenStore.getAccessToken() != nil else { return }
+        guard await tokenManager.getAccessToken() != nil else { return }
 
         isLoading = true
         defer { isLoading = false }
@@ -35,7 +35,7 @@ final class AuthService: ObservableObject {
             isAuthenticated = true
         } catch {
             // Tokens invalid or expired beyond refresh: clear state
-            tokenStore.deleteTokens()
+            await tokenManager.clearTokens()
             currentUser = nil
             isAuthenticated = false
         }
@@ -66,7 +66,7 @@ final class AuthService: ObservableObject {
                 body: RegisterRequest(email: email, password: password),
                 authenticated: false
             )
-            try tokenStore.saveTokens(access: response.accessToken, refresh: response.refreshToken)
+            try await tokenManager.storeTokens(access: response.accessToken, refresh: response.refreshToken)
             currentUser = response.user
             isAuthenticated = true
         } catch let error as APIError {
@@ -96,7 +96,7 @@ final class AuthService: ObservableObject {
                 body: LoginRequest(email: email, password: password),
                 authenticated: false
             )
-            try tokenStore.saveTokens(access: response.accessToken, refresh: response.refreshToken)
+            try await tokenManager.storeTokens(access: response.accessToken, refresh: response.refreshToken)
             currentUser = response.user
             isAuthenticated = true
         } catch let error as APIError {
@@ -113,7 +113,7 @@ final class AuthService: ObservableObject {
         defer { isLoading = false }
 
         // Best-effort: notify backend, but always clear local state
-        if let refreshToken = tokenStore.getRefreshToken() {
+        if let refreshToken = await tokenManager.getRefreshToken() {
             do {
                 try await apiClient.requestVoid(
                     method: .post,
@@ -125,7 +125,7 @@ final class AuthService: ObservableObject {
             }
         }
 
-        tokenStore.deleteTokens()
+        await tokenManager.clearTokens()
         currentUser = nil
         isAuthenticated = false
         errorMessage = nil
@@ -174,7 +174,7 @@ final class AuthService: ObservableObject {
                 body: ChangePasswordRequest(currentPassword: current, newPassword: newPassword)
             )
             // Save new tokens (old ones are now revoked server-side)
-            try tokenStore.saveTokens(access: response.accessToken, refresh: response.refreshToken)
+            try await tokenManager.storeTokens(access: response.accessToken, refresh: response.refreshToken)
             currentUser = response.user
             return nil
         } catch let error as APIError {

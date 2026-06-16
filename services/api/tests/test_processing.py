@@ -254,9 +254,11 @@ class TestProcessingWorker:
 
     @pytest.fixture
     def worker_settings(self) -> Settings:
-        """Settings for worker tests."""
+        """Settings for worker tests (isolated from .env)."""
         return Settings(
+            _env_file=None,
             database_url="postgresql://test:test@localhost:5433/test",
+            jwt_secret="test-secret-key-minimum-32-chars!",
             nvidia_api_key="nvapi-test-key",
             max_processing_attempts=3,
             processing_poll_interval_seconds=1,

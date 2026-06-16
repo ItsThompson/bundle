@@ -6,6 +6,7 @@ import re
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import assert_never
 
 import asyncpg
 import httpx
@@ -161,8 +162,8 @@ class ProcessingWorker:
                 return await self._process_note(artifact)
             case ArtifactType.LINK:
                 return await self._process_link(artifact)
-        # No default case: StrEnum + match is exhaustive.
-        # Adding a new type without handling it here will be caught by pyright.
+            case _ as unreachable:
+                assert_never(unreachable)
 
     async def _process_screenshot(self, artifact: asyncpg.Record) -> tuple[list[str], list[float]]:
         """Process screenshot: read image, tag via vision, embed tags."""

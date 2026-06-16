@@ -9,7 +9,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let noteEditor = NoteEditor()
     private let linkInput = LinkInput()
 
-    // Shared dependencies
     private let localDatabase = LocalDatabase()
     private let tokenManager = TokenManager()
     private lazy var uploadService = ArtifactUploadService(tokenManager: tokenManager)
@@ -26,27 +25,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         requestAccessibilityIfNeeded()
         requestScreenCaptureIfNeeded()
-        setupPanels()
-        openDatabaseWithRetry()
-        setupHotkey()
-        Task { await authService.restoreSession() }
-    }
-
-    func openSettings() {
-        settingsPanel?.toggle()
-    }
-
-    func showRetrievalPanel() {
-        retrievalPanel?.toggle()
-    }
-
-    func showCapturePalette() {
-        handleHotkeyPressed()
-    }
-
-    // MARK: - Setup
-
-    private func setupPanels() {
         settingsPanel = SettingsPanel(
             authService: authService,
             hotkeyManager: hotkeyManager,
@@ -55,47 +33,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         )
         retrievalPanel = RetrievalPanel(localDatabase: localDatabase)
-    }
-
-    private func setupHotkey() {
-        hotkeyManager.onHotkeyPressed = { [weak self] in
-            self?.handleHotkeyPressed()
-        }
+        openDatabaseWithRetry()
+        hotkeyManager.onHotkeyPressed = { [weak self] in self?.handleHotkeyPressed() }
         hotkeyManager.register()
+        Task { await authService.restoreSession() }
     }
 
-    // MARK: - Database Open with Retry/Quit Alert
+    func openSettings() { settingsPanel?.toggle() }
+    func showRetrievalPanel() { retrievalPanel?.toggle() }
+    func showCapturePalette() { handleHotkeyPressed() }
+
+    // MARK: - Database Open with Retry/Quit
 
     private func openDatabaseWithRetry() {
         do {
             try localDatabase.open()
         } catch {
-            showDatabaseOpenFailedAlert(error: error)
+            let alert = NSAlert()
+            alert.messageText = "Database Error"
+            alert.informativeText = "Failed to open the local database: \(error.localizedDescription)"
+            alert.alertStyle = .critical
+            alert.addButton(withTitle: "Retry")
+            alert.addButton(withTitle: "Quit")
+            if alert.runModal() == .alertFirstButtonReturn {
+                openDatabaseWithRetry()
+            } else {
+                NSApp.terminate(nil)
+            }
         }
     }
 
-    private func showDatabaseOpenFailedAlert(error: Error) {
-        let alert = NSAlert()
-        alert.messageText = "Database Error"
-        alert.informativeText = "Failed to open the local database: \(error.localizedDescription)"
-        alert.alertStyle = .critical
-        alert.addButton(withTitle: "Retry")
-        alert.addButton(withTitle: "Quit")
-
-        let response = alert.runModal()
-        if response == .alertFirstButtonReturn {
-            openDatabaseWithRetry()
-        } else {
-            NSApp.terminate(nil)
-        }
-    }
-
-    // MARK: - Hotkey & Capture Dispatch
+    // MARK: - Capture Dispatch
 
     private func handleHotkeyPressed() {
-        capturePalette.show { [weak self] option in
-            self?.handleCaptureOption(option)
-        }
+        capturePalette.show { [weak self] option in self?.handleCaptureOption(option) }
     }
 
     private func handleCaptureOption(_ option: CaptureOption) {
@@ -121,31 +92,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .link:
             linkInput.show { [weak self] url in
                 guard let self else { return }
-                Task {
-                    await self.captureCoordinator.handle(.link(url: url, createdAt: Date()))
-                }
+                Task { await self.captureCoordinator.handle(.link(url: url, createdAt: Date())) }
             }
-        }
-    }
-
-    // MARK: - Permissions
-
-    private func requestAccessibilityIfNeeded() {
-        let trusted = AXIsProcessTrusted()
-        if !trusted {
-            let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
-            AXIsProcessTrustedWithOptions(options)
-        }
-        let canPost = CGPreflightPostEventAccess()
-        if !canPost {
-            CGRequestPostEventAccess()
-        }
-    }
-
-    private func requestScreenCaptureIfNeeded() {
-        let hasAccess = CGPreflightScreenCaptureAccess()
-        if !hasAccess {
-            CGRequestScreenCaptureAccess()
         }
     }
 }

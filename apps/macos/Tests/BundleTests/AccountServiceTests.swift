@@ -3,9 +3,13 @@ import XCTest
 
 @MainActor
 final class AccountServiceTests: XCTestCase {
+    private func makeAuthService(tokenStore: MockTokenStore = MockTokenStore()) -> AuthService {
+        let tokenManager = TokenManager(tokenStore: tokenStore)
+        return AuthService(tokenManager: tokenManager)
+    }
+
     func testChangePasswordReturnsErrorWhenPasswordsMismatch() async {
-        let tokenStore = MockTokenStore()
-        let authService = AuthService(tokenStore: tokenStore)
+        let authService = makeAuthService()
 
         let error = await authService.changePassword(
             current: "OldPass1",
@@ -17,8 +21,7 @@ final class AccountServiceTests: XCTestCase {
     }
 
     func testChangePasswordValidatesMinLength() async {
-        let tokenStore = MockTokenStore()
-        let authService = AuthService(tokenStore: tokenStore)
+        let authService = makeAuthService()
 
         let error = await authService.changePassword(
             current: "OldPass1",
@@ -31,8 +34,7 @@ final class AccountServiceTests: XCTestCase {
     }
 
     func testChangePasswordValidatesUppercase() async {
-        let tokenStore = MockTokenStore()
-        let authService = AuthService(tokenStore: tokenStore)
+        let authService = makeAuthService()
 
         let error = await authService.changePassword(
             current: "OldPass1",
@@ -45,8 +47,7 @@ final class AccountServiceTests: XCTestCase {
     }
 
     func testChangePasswordValidatesLowercase() async {
-        let tokenStore = MockTokenStore()
-        let authService = AuthService(tokenStore: tokenStore)
+        let authService = makeAuthService()
 
         let error = await authService.changePassword(
             current: "OldPass1",
@@ -59,8 +60,7 @@ final class AccountServiceTests: XCTestCase {
     }
 
     func testChangePasswordValidatesDigit() async {
-        let tokenStore = MockTokenStore()
-        let authService = AuthService(tokenStore: tokenStore)
+        let authService = makeAuthService()
 
         let error = await authService.changePassword(
             current: "OldPass1",
@@ -73,8 +73,7 @@ final class AccountServiceTests: XCTestCase {
     }
 
     func testChangePasswordValidatesMaxLength() async {
-        let tokenStore = MockTokenStore()
-        let authService = AuthService(tokenStore: tokenStore)
+        let authService = makeAuthService()
 
         let longPassword = String(repeating: "A", count: 73)
         let error = await authService.changePassword(
@@ -88,8 +87,7 @@ final class AccountServiceTests: XCTestCase {
     }
 
     func testUpdateEmailValidatesFormat() async {
-        let tokenStore = MockTokenStore()
-        let authService = AuthService(tokenStore: tokenStore)
+        let authService = makeAuthService()
 
         let error = await authService.updateEmail("not-an-email")
 
@@ -98,8 +96,7 @@ final class AccountServiceTests: XCTestCase {
     }
 
     func testUpdateEmailRejectsEmpty() async {
-        let tokenStore = MockTokenStore()
-        let authService = AuthService(tokenStore: tokenStore)
+        let authService = makeAuthService()
 
         let error = await authService.updateEmail("")
 

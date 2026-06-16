@@ -3,6 +3,7 @@ import Foundation
 import Testing
 
 @Suite("Note Capture Tests")
+@MainActor
 struct NoteCaptureTests {
     // MARK: - Database Integration
 

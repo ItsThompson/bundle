@@ -59,7 +59,7 @@ final class ArtifactModelTests: XCTestCase {
             type: .link,
             contentPath: nil,
             contentText: "https://www.example.com/some/path",
-            status: "completed",
+            status: .completed,
             createdAt: Date(),
             syncedAt: nil,
             tags: []
@@ -73,7 +73,7 @@ final class ArtifactModelTests: XCTestCase {
             type: .screenshot,
             contentPath: "2026/06/10/abc.png",
             contentText: nil,
-            status: "pending",
+            status: .pending,
             createdAt: Date(),
             syncedAt: nil,
             tags: []
@@ -87,7 +87,7 @@ final class ArtifactModelTests: XCTestCase {
             type: .note,
             contentPath: "2026/06/10/abc.md",
             contentText: "Some note content",
-            status: "pending",
+            status: .pending,
             createdAt: Date(),
             syncedAt: nil,
             tags: []
@@ -101,7 +101,7 @@ final class ArtifactModelTests: XCTestCase {
             type: .link,
             contentPath: nil,
             contentText: "not a valid url",
-            status: "pending",
+            status: .pending,
             createdAt: Date(),
             syncedAt: nil,
             tags: []

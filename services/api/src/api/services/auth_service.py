@@ -1,13 +1,17 @@
-"""Authentication service: JWT lifecycle, password hashing, token rotation."""
+"""Authentication service: JWT lifecycle, password hashing, token rotation, and user persistence."""
 
 import re
 import uuid
 from datetime import UTC, datetime, timedelta
 
+import asyncpg
 import bcrypt
 import jwt
+import structlog
 
 from api.config import Settings
+
+logger = structlog.get_logger("api.auth_service")
 
 
 class PasswordValidationError(Exception):
@@ -142,3 +146,132 @@ def decode_refresh_token(token: str, settings: Settings) -> dict:
         raise TokenError("Invalid refresh token: missing jti")
 
     return payload
+
+
+# --- Database operations ---
+
+
+async def register_user(
+    conn: asyncpg.Connection,
+    *,
+    email: str,
+    password_hash: str,
+) -> dict:
+    """Insert a new user. Returns the created user record.
+
+    Raises asyncpg.UniqueViolationError if email already exists.
+    """
+    row = await conn.fetchrow(
+        """
+        INSERT INTO auth.users (email, password_hash)
+        VALUES ($1, $2)
+        RETURNING id, email, created_at, updated_at
+        """,
+        email,
+        password_hash,
+    )
+    return dict(row)
+
+
+async def lookup_user_by_email(
+    conn: asyncpg.Connection,
+    *,
+    email: str,
+) -> dict | None:
+    """Look up a user by email for login. Returns user row or None."""
+    row = await conn.fetchrow(
+        """
+        SELECT id, email, password_hash, tokens_revoked_at, created_at, updated_at
+        FROM auth.users
+        WHERE email = $1
+        """,
+        email,
+    )
+    return dict(row) if row else None
+
+
+async def is_token_blacklisted(
+    conn: asyncpg.Connection,
+    *,
+    jti: uuid.UUID,
+) -> bool:
+    """Check if a refresh token JTI is blacklisted."""
+    return await conn.fetchval(
+        "SELECT EXISTS(SELECT 1 FROM auth.refresh_token_blacklist WHERE jti = $1)",
+        jti,
+    )
+
+
+async def blacklist_token(
+    conn: asyncpg.Connection,
+    *,
+    jti: uuid.UUID,
+    user_id: uuid.UUID,
+    expires_at: datetime,
+) -> None:
+    """Add a refresh token to the blacklist."""
+    await conn.execute(
+        """
+        INSERT INTO auth.refresh_token_blacklist (jti, user_id, expires_at)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (jti) DO NOTHING
+        """,
+        jti,
+        user_id,
+        expires_at,
+    )
+
+
+async def update_user_email(
+    conn: asyncpg.Connection,
+    *,
+    user_id: uuid.UUID,
+    new_email: str,
+) -> dict | None:
+    """Update a user's email. Returns updated row or None.
+
+    Raises asyncpg.UniqueViolationError if email is already in use.
+    """
+    row = await conn.fetchrow(
+        """
+        UPDATE auth.users
+        SET email = $2, updated_at = now()
+        WHERE id = $1
+        RETURNING id, email, created_at, updated_at
+        """,
+        user_id,
+        new_email,
+    )
+    return dict(row) if row else None
+
+
+async def get_password_hash(
+    conn: asyncpg.Connection,
+    *,
+    user_id: uuid.UUID,
+) -> str | None:
+    """Get the current password hash for a user. Returns None if user not found."""
+    return await conn.fetchval(
+        "SELECT password_hash FROM auth.users WHERE id = $1",
+        user_id,
+    )
+
+
+async def change_password(
+    conn: asyncpg.Connection,
+    *,
+    user_id: uuid.UUID,
+    new_password_hash: str,
+) -> dict | None:
+    """Update password and revoke all sessions. Returns updated user row or None."""
+    row = await conn.fetchrow(
+        """
+        UPDATE auth.users
+        SET password_hash = $2, tokens_revoked_at = now(), updated_at = now()
+        WHERE id = $1
+        RETURNING id, email, created_at, updated_at
+        """,
+        user_id,
+        new_password_hash,
+    )
+    return dict(row) if row else None

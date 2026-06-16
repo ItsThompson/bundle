@@ -12,6 +12,7 @@ import httpx
 import structlog
 
 from api.config import Settings
+from api.models.domain import ArtifactType, ProcessingStatus
 from api.processing.embedder import Embedder
 from api.processing.image_utils import resize_for_vision
 from api.processing.tagger import Tagger, TagParseError
@@ -68,9 +69,11 @@ class ProcessingWorker:
             count = await conn.execute(
                 """
                 UPDATE artifacts
-                SET status = 'pending', updated_at = now()
-                WHERE status = 'processing'
-                """
+                SET status = $1, updated_at = now()
+                WHERE status = $2
+                """,
+                ProcessingStatus.PENDING,
+                ProcessingStatus.PROCESSING,
             )
         logger.info("worker_recovery_complete", reset_count=count)
 
@@ -107,17 +110,19 @@ class ProcessingWorker:
             return await conn.fetchrow(
                 """
                 UPDATE artifacts
-                SET status = 'processing', updated_at = now()
+                SET status = $1, updated_at = now()
                 WHERE id = (
                     SELECT id FROM artifacts
-                    WHERE status = 'pending'
+                    WHERE status = $2
                       AND (scheduled_after IS NULL OR scheduled_after <= now())
                     ORDER BY created_at ASC
                     LIMIT 1
                     FOR UPDATE SKIP LOCKED
                 )
                 RETURNING id, user_id, type, storage_path, content_text, attempts
-                """
+                """,
+                ProcessingStatus.PROCESSING,
+                ProcessingStatus.PENDING,
             )
 
     async def _process_artifact(self, artifact: asyncpg.Record) -> None:
@@ -147,17 +152,17 @@ class ProcessingWorker:
         self, artifact: asyncpg.Record
     ) -> tuple[list[str], list[float]]:
         """Generate tags and embedding based on artifact type."""
-        artifact_type = artifact["type"]
+        artifact_type = ArtifactType(artifact["type"])
 
         match artifact_type:
-            case "screenshot":
+            case ArtifactType.SCREENSHOT:
                 return await self._process_screenshot(artifact)
-            case "note":
+            case ArtifactType.NOTE:
                 return await self._process_note(artifact)
-            case "link":
+            case ArtifactType.LINK:
                 return await self._process_link(artifact)
-            case _:
-                raise ValueError(f"Unknown artifact type: {artifact_type}")
+        # No default case: StrEnum + match is exhaustive.
+        # Adding a new type without handling it here will be caught by pyright.
 
     async def _process_screenshot(self, artifact: asyncpg.Record) -> tuple[list[str], list[float]]:
         """Process screenshot: read image, tag via vision, embed tags."""
@@ -271,10 +276,11 @@ class ProcessingWorker:
             await conn.execute(
                 """
                     UPDATE artifacts
-                    SET status = 'completed', updated_at = now()
+                    SET status = $2, updated_at = now()
                     WHERE id = $1
                     """,
                 artifact_id,
+                ProcessingStatus.COMPLETED,
             )
 
     async def _handle_failure(self, artifact: asyncpg.Record, exc: Exception) -> None:
@@ -291,11 +297,12 @@ class ProcessingWorker:
                 await conn.execute(
                     """
                     UPDATE artifacts
-                    SET status = 'failed', attempts = $2, updated_at = now()
+                    SET status = $3, attempts = $2, updated_at = now()
                     WHERE id = $1
                     """,
                     artifact_id,
                     attempts,
+                    ProcessingStatus.FAILED,
                 )
             logger.error(
                 "processing_failed_permanent",
@@ -312,13 +319,14 @@ class ProcessingWorker:
                 await conn.execute(
                     """
                     UPDATE artifacts
-                    SET status = 'pending', attempts = $2,
+                    SET status = $4, attempts = $2,
                         scheduled_after = $3, updated_at = now()
                     WHERE id = $1
                     """,
                     artifact_id,
                     attempts,
                     scheduled_after,
+                    ProcessingStatus.PENDING,
                 )
             logger.warning(
                 "processing_failed_retry",

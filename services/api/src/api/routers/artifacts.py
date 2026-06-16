@@ -29,6 +29,7 @@ from api.models.artifact_responses import (
     SearchResponse,
     SearchResultResponse,
 )
+from api.models.domain import ARTIFACT_MEDIA_TYPES, ArtifactType, ProcessingStatus
 from api.services import artifact_service, processing_service, search_service
 
 router = APIRouter(prefix="/api/v1/artifacts", tags=["artifacts"])
@@ -55,11 +56,13 @@ async def upload_artifact(
     settings = request.app.state.settings
 
     # Validate type
-    if type not in ("screenshot", "note", "link"):
+    try:
+        artifact_type = ArtifactType(type)
+    except ValueError:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="type must be one of: screenshot, note, link",
-        )
+        ) from None
 
     # Parse created_at timestamp
     try:
@@ -98,7 +101,7 @@ async def upload_artifact(
         pool=pool,
         settings=settings,
         user_id=current_user.id,
-        artifact_type=type,
+        artifact_type=artifact_type,
         file_content=content,
         content_text=content_text,
         created_at=parsed_created_at,
@@ -312,7 +315,9 @@ async def get_artifact_content(
             detail="Artifact file not found on disk",
         )
 
-    media_type = _media_type_for_artifact(row["type"])
+    media_type = ARTIFACT_MEDIA_TYPES.get(
+        ArtifactType(row["type"]), "application/octet-stream"
+    )
     return FileResponse(path=str(file_path), media_type=media_type)
 
 
@@ -331,12 +336,14 @@ async def retry_artifact(
         row = await conn.fetchrow(
             """
             UPDATE artifacts
-            SET status = 'pending', attempts = 0, scheduled_after = NULL, updated_at = now()
-            WHERE id = $1 AND user_id = $2 AND status = 'failed'
+            SET status = $3, attempts = 0, scheduled_after = NULL, updated_at = now()
+            WHERE id = $1 AND user_id = $2 AND status = $4
             RETURNING id, type, status, created_at, updated_at
             """,
             artifact_id,
             current_user.id,
+            ProcessingStatus.PENDING.value,
+            ProcessingStatus.FAILED.value,
         )
 
     if row is None:
@@ -373,19 +380,6 @@ async def retry_artifact(
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
-
-
-def _media_type_for_artifact(artifact_type: str) -> str:
-    """Return the MIME type for serving artifact files."""
-    match artifact_type:
-        case "screenshot":
-            return "image/png"
-        case "note":
-            return "text/markdown"
-        case "link":
-            return "application/json"
-        case _:
-            return "application/octet-stream"
 
 
 def _get_embedding_provider(request: Request):

@@ -293,8 +293,12 @@ class TestProcessingWorker:
 
         mock_conn.execute.assert_called_once()
         sql = mock_conn.execute.call_args[0][0]
-        assert "SET status = 'pending'" in sql
-        assert "WHERE status = 'processing'" in sql
+        args = mock_conn.execute.call_args[0][1:]
+        assert "SET status" in sql
+        assert "WHERE status" in sql
+        # Verify parameterized values: pending and processing
+        assert "pending" in args
+        assert "processing" in args
 
     @pytest.mark.asyncio
     async def test_claim_next_artifact(
@@ -471,8 +475,10 @@ class TestProcessingWorker:
 
         # Should set status='pending' with scheduled_after
         sql = mock_conn.execute.call_args[0][0]
-        assert "SET status = 'pending'" in sql
+        args = mock_conn.execute.call_args[0][1:]
         assert "scheduled_after" in sql
+        # Verify the status parameter is 'pending'
+        assert "pending" in args
 
     @pytest.mark.asyncio
     async def test_handle_failure_permanent_on_max_attempts(
@@ -494,7 +500,10 @@ class TestProcessingWorker:
         await worker._handle_failure(mock_record, TagParseError("bad json"))
 
         sql = mock_conn.execute.call_args[0][0]
-        assert "SET status = 'failed'" in sql
+        args = mock_conn.execute.call_args[0][1:]
+        assert "SET status" in sql
+        # Verify the status parameter is 'failed'
+        assert "failed" in args
 
     @pytest.mark.asyncio
     async def test_handle_failure_non_retryable_error(
@@ -516,4 +525,7 @@ class TestProcessingWorker:
         await worker._handle_failure(mock_record, ValueError("empty content"))
 
         sql = mock_conn.execute.call_args[0][0]
-        assert "SET status = 'failed'" in sql
+        args = mock_conn.execute.call_args[0][1:]
+        assert "SET status" in sql
+        # Verify the status parameter is 'failed'
+        assert "failed" in args

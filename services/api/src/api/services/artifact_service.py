@@ -8,6 +8,7 @@ import asyncpg
 import structlog
 
 from api.config import Settings
+from api.models.domain import ARTIFACT_EXTENSIONS, ArtifactType, ProcessingStatus
 
 logger = structlog.get_logger("api.artifact_service")
 
@@ -16,7 +17,7 @@ async def create_artifact(
     pool: asyncpg.Pool,
     settings: Settings,
     user_id: uuid.UUID,
-    artifact_type: str,
+    artifact_type: ArtifactType,
     file_content: bytes,
     created_at: datetime,
     content_text: str | None = None,
@@ -29,7 +30,7 @@ async def create_artifact(
     """
     artifact_id = uuid.uuid4()
     date_str = created_at.strftime("%Y/%m/%d")
-    file_ext = _extension_for_type(artifact_type)
+    file_ext = ARTIFACT_EXTENSIONS[artifact_type]
     relative_path = f"{user_id}/{date_str}/{artifact_id}{file_ext}"
     full_path = Path(settings.artifacts_path) / relative_path
 
@@ -47,7 +48,7 @@ async def create_artifact(
 
     # Determine content_text: explicit value takes precedence,
     # otherwise extract from file content for notes
-    if content_text is None and artifact_type == "note":
+    if content_text is None and artifact_type == ArtifactType.NOTE:
         content_text = file_content.decode("utf-8", errors="replace")
 
     # Insert DB row
@@ -55,30 +56,18 @@ async def create_artifact(
         row = await conn.fetchrow(
             """
             INSERT INTO artifacts (id, user_id, type, storage_path, content_text, status, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, 'pending', $6, $6)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
             RETURNING id, user_id, type, storage_path, content_text, status, attempts,
                       scheduled_after, created_at, updated_at
             """,
             artifact_id,
             user_id,
-            artifact_type,
+            artifact_type.value,
             relative_path,
             content_text,
+            ProcessingStatus.PENDING.value,
             created_at.astimezone(UTC),
         )
 
     logger.info("artifact_created", artifact_id=str(artifact_id), type=artifact_type)
     return dict(row)
-
-
-def _extension_for_type(artifact_type: str) -> str:
-    """Return file extension for a given artifact type."""
-    match artifact_type:
-        case "screenshot":
-            return ".png"
-        case "note":
-            return ".md"
-        case "link":
-            return ".json"
-        case _:
-            return ".bin"

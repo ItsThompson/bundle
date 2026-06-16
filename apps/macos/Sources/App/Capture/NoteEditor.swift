@@ -1,8 +1,9 @@
 import AppKit
 import SwiftUI
 
-/// Result of a note capture operation.
-struct NoteCaptureResult {
+/// Raw output of the note editor.
+/// Renamed from NoteCaptureResult to avoid confusion with the unified Models/CaptureResult enum.
+struct NoteCaptureOutput {
     let filePath: URL
     let artifactId: String
     let content: String
@@ -17,7 +18,7 @@ private let maxNoteLength = 50_000
 @MainActor
 final class NoteEditor {
     private var panel: NSPanel?
-    private var onSave: ((NoteCaptureResult) -> Void)?
+    private var onSave: ((NoteCaptureOutput) -> Void)?
     private var localMonitor: Any?
 
     var isVisible: Bool {
@@ -26,7 +27,7 @@ final class NoteEditor {
 
     /// Show the note editor panel centered on the active screen.
     /// Calls onSave with the capture result when the user saves (Cmd+Enter).
-    func show(onSave: @escaping (NoteCaptureResult) -> Void) {
+    func show(onSave: @escaping (NoteCaptureOutput) -> Void) {
         if isVisible {
             dismiss()
             return
@@ -138,7 +139,7 @@ final class NoteEditor {
 
     // MARK: - File Save
 
-    private func saveNoteFile(content: String) -> NoteCaptureResult? {
+    private func saveNoteFile(content: String) -> NoteCaptureOutput? {
         let now = Date()
         let artifactId = UUID().uuidString.lowercased()
         let dateFormatter = DateFormatter()
@@ -163,7 +164,7 @@ final class NoteEditor {
             return nil
         }
 
-        return NoteCaptureResult(
+        return NoteCaptureOutput(
             filePath: filePath,
             artifactId: artifactId,
             content: content,

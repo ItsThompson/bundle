@@ -2,8 +2,9 @@ import AppKit
 import CoreGraphics
 import ScreenCaptureKit
 
-/// Result of a screenshot capture operation.
-struct CaptureResult {
+/// Raw output of the screenshot capture tool.
+/// Renamed from CaptureResult to avoid conflict with the unified Models/CaptureResult enum.
+struct ScreenshotCaptureOutput {
     let fullPath: URL
     let thumbnailPath: URL
     let artifactId: String
@@ -17,11 +18,11 @@ final class ScreenshotCapture {
     private var overlayWindow: NSWindow?
     private var selectionView: RegionSelectionView?
     private var escapeMonitor: Any?
-    private var completion: ((CaptureResult?) -> Void)?
+    private var completion: ((ScreenshotCaptureOutput?) -> Void)?
 
     /// Begin region selection mode. Calls completion with the capture result on success,
     /// or nil if the user cancels (Escape or right-click).
-    func captureRegion(completion: @escaping (CaptureResult?) -> Void) {
+    func captureRegion(completion: @escaping (ScreenshotCaptureOutput?) -> Void) {
         guard let screen = NSScreen.main else {
             completion(nil)
             return
@@ -77,7 +78,7 @@ final class ScreenshotCapture {
         handler?(nil)
     }
 
-    private func finishCapture(rect: NSRect, screen: NSScreen, completion: @escaping (CaptureResult?) -> Void) {
+    private func finishCapture(rect: NSRect, screen: NSScreen, completion: @escaping (ScreenshotCaptureOutput?) -> Void) {
         dismissOverlay()
 
         // Convert from screen coordinates (origin bottom-left) to CG coordinates (origin top-left)
@@ -181,7 +182,7 @@ final class ScreenshotCapture {
 
     // MARK: - File Save
 
-    private func saveCapture(image: CGImage) -> CaptureResult? {
+    private func saveCapture(image: CGImage) -> ScreenshotCaptureOutput? {
         let now = Date()
         let artifactId = UUID().uuidString.lowercased()
         let dateFormatter = DateFormatter()
@@ -212,7 +213,7 @@ final class ScreenshotCapture {
             _ = savePNG(image: thumbnail, to: thumbnailPath)
         }
 
-        return CaptureResult(
+        return ScreenshotCaptureOutput(
             fullPath: fullPath,
             thumbnailPath: thumbnailPath,
             artifactId: artifactId,

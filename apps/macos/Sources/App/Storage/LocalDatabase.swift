@@ -222,7 +222,7 @@ final class LocalDatabase {
 
     /// Get all pending artifacts (for retry upload).
     func getPendingArtifacts() throws -> [LocalArtifact] {
-        let sql = "SELECT id, type, content_path, content_text, status, created_at, synced_at FROM artifacts WHERE status = 'pending' ORDER BY created_at ASC"
+        let sql = "SELECT id, type, content_path, content_text, status, created_at, synced_at FROM artifacts WHERE status = 'pending' AND (upload_state = 'idle' OR upload_state IS NULL) ORDER BY created_at ASC"
         return try queryArtifacts(sql: sql)
     }
 

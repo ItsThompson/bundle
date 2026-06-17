@@ -8,8 +8,14 @@ db_url := env("DATABASE_URL", "postgresql://bundle:bundle_dev@localhost:5433/bun
 # Start development services (PostgreSQL + pgvector)
 dev:
     docker compose -f docker-compose.dev.yml up -d
+    @echo "Starting worker in background..."
+    uv run --package bundle-api python -m api.worker_main &
     @echo "Starting API with hot reload..."
     uv run --package bundle-api uvicorn api.main:app --reload --host 0.0.0.0 --port 8018 --app-dir services/api/src
+
+# Start the processing worker (separate terminal)
+dev-worker:
+    uv run --package bundle-api python -m api.worker_main --app-dir services/api/src
 
 # Start only the database
 dev-db:

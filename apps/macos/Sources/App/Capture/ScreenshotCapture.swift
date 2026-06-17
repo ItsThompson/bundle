@@ -23,7 +23,8 @@ final class ScreenshotCapture {
     /// Begin region selection mode. Calls completion with the capture result on success,
     /// or nil if the user cancels (Escape or right-click).
     func captureRegion(completion: @escaping (ScreenshotCaptureOutput?) -> Void) {
-        guard let screen = NSScreen.main else {
+        let mouseLocation = NSEvent.mouseLocation
+        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }) ?? NSScreen.main else {
             completion(nil)
             return
         }
@@ -118,9 +119,10 @@ final class ScreenshotCapture {
         do {
             let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
 
-            // Find the SCDisplay matching the target NSScreen
+            // Match SCDisplay by CGDirectDisplayID for reliable multi-monitor support
+            let screenNumber = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
             guard let display = content.displays.first(where: { display in
-                display.frame == screen.frame
+                display.displayID == screenNumber
             }) ?? content.displays.first else {
                 return nil
             }
